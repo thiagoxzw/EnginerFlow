@@ -1,0 +1,26 @@
+# Infraestrutura local de desenvolvimento (ADR-0002, ADR-0004, ADR-0010).
+# Somente PostgreSQL: Redis/Celery não são usados nesta fase.
+# API e web rodam no host para facilitar depuração.
+name: engiflow
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: engiflow
+      POSTGRES_USER: engiflow
+      POSTGRES_PASSWORD: ${ENGIFLOW_DB_PASSWORD:-engiflow-dev-only}
+    ports:
+      # Exposto apenas no loopback da máquina.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - engiflow-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engiflow -d engiflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  engiflow-pgdata:

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: API (Python)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: engiflow_test
+          POSTGRES_USER: engiflow
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U engiflow -d engiflow_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      ENGIFLOW_TEST_DATABASE_URL: postgresql+psycopg://engiflow:ci-only-password@127.0.0.1:5432/engiflow_test
+      ENGIFLOW_DATABASE_URL: postgresql+psycopg://engiflow:ci-only-password@127.0.0.1:5432/engiflow_test
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Instalar dependências (lock)
+        run: uv sync --locked
+      - name: Lint (ruff)
+        run: |
+          uv run ruff check src tests migrations
+          uv run ruff format --check src tests migrations
+      - name: Tipos (mypy strict)
+        run: uv run mypy
+      - name: Migrações (upgrade, downgrade, upgrade)
+        run: |
+          uv run alembic -c alembic.ini upgrade head
+          uv run alembic -c alembic.ini downgrade base
+          uv run alembic -c alembic.ini upgrade head
+      - name: Testes
+        run: uv run pytest -q
+
+  web:
+    name: Web (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build

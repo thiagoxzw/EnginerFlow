@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Tokens semânticos. Tema claro por padrão; escuro via preferência do sistema ou data-theme. */
+:root {
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-fg: #111418;
+  --color-muted: #5b6470;
+  --color-border: #d9dde3;
+  --color-accent: #0b5cad;
+  --color-danger: #b42318;
+  --color-success: #067647;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #0e1116;
+    --color-surface: #161b22;
+    --color-fg: #e6e9ee;
+    --color-muted: #9aa4b2;
+    --color-border: #2a313c;
+    --color-accent: #6cb2ff;
+    --color-danger: #ff8a80;
+    --color-success: #6ddc9a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #0e1116;
+  --color-surface: #161b22;
+  --color-fg: #e6e9ee;
+  --color-muted: #9aa4b2;
+  --color-border: #2a313c;
+  --color-accent: #6cb2ff;
+  --color-danger: #ff8a80;
+  --color-success: #6ddc9a;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
