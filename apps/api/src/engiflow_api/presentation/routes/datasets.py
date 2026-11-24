@@ -100,6 +100,7 @@ class SimilarOut(BaseModel):
     score: float
     shared_tokens: list[str]
     reason: str
+    spec_match: bool
 
 
 class DuplicatesOut(BaseModel):
@@ -291,6 +292,7 @@ def _duplicates_report(
                 score=p.score,
                 shared_tokens=p.shared_tokens,
                 reason=p.reason,
+                spec_match=p.spec_match,
             )
             for p in report.similar_descriptions
         ],

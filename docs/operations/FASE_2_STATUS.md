@@ -108,3 +108,36 @@ Testes: `test_regression_csv_export_*`, `test_regression_xlsx_export_*`, `test_r
 2. Medir com volume maior (ex.: 500 mil linhas) em PostgreSQL, e só então definir limites com base nos números obtidos.
 3. Medir a memória das duplicatas e das exportações, e avaliar exportação em streaming se o volume exigir.
 4. Templates de mapeamento, filtros e exclusão de tabelas.
+
+## Etapa 2 — verificações adicionais (2026-11-24)
+
+Cada item foi reproduzido com um script antes da correção. Os testes de regressão estão em `apps/api/tests/test_data_studio_revisao2.py`.
+
+| Verificação | Resultado antes | Ação | Status |
+|---|---|---|---|
+| Colisão de nomes de cabeçalho | `['A','A','A (2)']` gerava `A (2)` duplicado | Dedup contra todos os nomes já usados, sem diferença de caixa | **Corrigido**: `unique_headers(["A","A","A (2)"])` → `A`, `A (2)`, `A (2) (2)` |
+| Detecção de cabeçalho em planilha textual | linha de dados mais larga era escolhida (índice 1 em vez de 0) | Primeira linha plausível: largura compatível, sem números puros, nomes únicos | **Corrigido**; títulos de uma célula são ignorados. Limitação: se o cabeçalho vier depois de um título com 2 ou mais células textuais, o título pode ser escolhido |
+| Descrições idênticas com tokens frequentes | par `parafuso peça` / `parafuso peça` ignorado (todos os tokens acima de 500) | Candidatos também por descrição normalizada idêntica e por mesmos termos, independentemente da frequência | **Corrigido** |
+| Memória na geração de candidatos | pior caso: 3,3 milhões de pares, **371 MB** e 5,5 s antes de recusar | Teto aplicado durante a geração, não ao final | **Corrigido**: 36,7 MB e 0,5 s (mesmo caso); também na comparação por zeros e na suspeita de zeros |
+| Importações simultâneas do mesmo arquivo | não testado | 4 threads, mesmo conteúdo | **Testado em SQLite**: 1 registro, 1 arquivo final, nenhum temporário, sem erro. **PostgreSQL: pendente** |
+| Especificações técnicas (Ø, ±, °, %, vírgula decimal, unidades) | `Ø10` = `10`; `±0,1` = `0,1`; `10,5` = `10 5` | Símbolos viram termos; decimal preservado; especificação comparada à parte | **Corrigido**. Pares com especificação diferente aparecem com `spec_match=false` e motivo "não considerar equivalente" |
+| Persistência após reinício | não testado | fechar engine, reabrir, comparar hash do arquivo e contagem de linhas | **Testado em SQLite** |
+
+### Decisões que afetam o uso
+
+- `M8` vira o token `m8` (designação de peça). `M8x20` vira `m8`, `x`, `20`. `M 8` (com espaço) não é igual a `M8`: a comparação é conservadora e marca como diferente.
+- Especificação é o conjunto de números, unidades e símbolos. Dois textos com mesmo texto mas especificação diferente nunca são equivalentes.
+- O teto de candidatos é `MAX_CANDIDATE_PAIRS` (300.000). Acima disso a análise é recusada com mensagem para filtrar. O valor não foi calibrado com dados reais.
+
+### Limitações ainda abertas
+
+1. **PostgreSQL não verificado localmente.** Concorrência real, migração 0002 e a suíte completa contra PostgreSQL 17 dependem do CI do PR #1, que não rodou (ver abaixo).
+2. **Concorrência testada só com SQLite**, em que a escrita é serializada. O comportamento com `IntegrityError` e bloqueio de linha em PostgreSQL não foi reproduzido.
+3. **Descrição sem termos em comum e com ordem trocada de tokens frequentes** ainda pode não ser comparada se o score de texto ficar abaixo do limite. Não há semântica de sinônimos: `parafuso` e `fixador` não são semelhantes.
+4. **Materiais tecnicamente equivalentes não são reconhecidos automaticamente.** A ferramenta sugere, a decisão é humana.
+5. **Memória das exportações e da análise de duplicatas segue não medida** para volumes grandes.
+6. **Um título com duas células textuais antes do cabeçalho** pode ser escolhido como cabeçalho.
+
+### CI do PR #1
+
+O PR #1 foi criado. Os dois jobs do GitHub Actions falharam antes de iniciar os passos, com a mensagem de que a conta tem pagamento ou limite de gasto pendente. Isso bloqueia a validação em PostgreSQL 17, a migração 0002 no CI e a suíte completa no ambiente de CI. **Pendente** até a cobrança ser regularizada.

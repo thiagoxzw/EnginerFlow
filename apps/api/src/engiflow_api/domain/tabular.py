@@ -22,7 +22,43 @@ CANONICAL_FIELDS: tuple[str, ...] = ("code", "description", "unit", "quantity", 
 
 _WS = re.compile(r"\s+")
 _NUMERIC = re.compile(r"^[+-]?\d+([.,]\d+)?$")
-_TOKEN = re.compile(r"[a-z0-9]+")
+# Designações letra+número (M8 -> m8), números com decimal e palavras.
+# Dimensão "8x20" vira 8, x, 20; "10,5mm" vira 10.5, mm.
+_TOKEN = re.compile(r"[a-z]+\d+(?:\.\d+)?|\d+(?:\.\d+)?|[a-z]+")
+_DIMENSION_X = re.compile(r"(?<=\d)x(?=\d)")
+_DECIMAL_COMMA = re.compile(r"(\d),(\d)")
+# Símbolos técnicos preservados como palavras (não podem ser descartados na comparação).
+_SYMBOLS = (
+    ("Ø", " diam "),
+    ("ø", " diam "),
+    ("⌀", " diam "),
+    ("±", " tol "),
+    ("°", " graus "),
+    ("×", " x "),
+    ("%", " pct "),
+)
+# Palavras que fazem parte da especificação (unidades e símbolos).
+SPEC_WORDS = frozenset(
+    {
+        "diam",
+        "tol",
+        "graus",
+        "pct",
+        "x",
+        "mm",
+        "cm",
+        "m",
+        "kg",
+        "g",
+        "ml",
+        "l",
+        "kw",
+        "bar",
+        "v",
+        "a",
+    }
+)
+MAX_CANDIDATE_PAIRS = 300_000
 # Tokens presentes em muitas descrições geram pares demais. Acima deste número de ocorrências,
 # o token não é usado para gerar candidatos (ver limitação em FASE_2_STATUS.md).
 MAX_TOKEN_DOCUMENT_FREQUENCY = 500
@@ -61,10 +97,24 @@ def zero_group(key: str) -> str:
 
 
 def normalize_description(value: str) -> str:
-    """Descrição normalizada: sem acentos, caixa baixa, pontuação removida, espaços colapsados."""
+    """Descrição normalizada para comparação.
+
+    Sem acentos e caixa baixa; símbolos técnicos viram palavras (Ø -> diam, ± -> tol, ° -> graus,
+    × -> x, % -> pct); vírgula decimal vira ponto. Assim '10,5' != '105', 'Ø10' != '10' e
+    '±0,1' != '0,1'. Pontuação comum é descartada.
+    """
     decomposed = unicodedata.normalize("NFKD", clean_text(value))
-    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return " ".join(_TOKEN.findall(stripped.casefold()))
+    text = "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
+    for symbol, word in _SYMBOLS:
+        text = text.replace(symbol.casefold(), word)
+    text = _DECIMAL_COMMA.sub(r"\1.\2", text)
+    text = _DIMENSION_X.sub(" x ", text)
+    return " ".join(_TOKEN.findall(text))
+
+
+def spec_signature(tokens: Sequence[str]) -> tuple[str, ...]:
+    """Especificação técnica: números e unidades/símbolos, em ordem canônica."""
+    return tuple(sorted(t for t in tokens if any(ch.isdigit() for ch in t) or t in SPEC_WORDS))
 
 
 def description_tokens(value: str) -> list[str]:
@@ -74,33 +124,50 @@ def description_tokens(value: str) -> list[str]:
 def detect_header_index(rows: Sequence[Sequence[str]], max_scan: int = 20) -> int:
     """Escolhe a linha de cabeçalho entre as primeiras linhas.
 
-    Prefere linhas com muitas células preenchidas e maioria de textos (não números).
-    Sem candidato claro, usa a primeira linha.
+    Critério: a PRIMEIRA linha com >= 2 células preenchidas, largura compatível com a linha mais
+    larga da amostra, sem números puros e com nomes únicos. Sem candidato, usa a linha mais
+    textual (desempate pela largura, depois pela primeira ocorrência).
     """
-    best_idx = 0
-    best_score = -1
+    candidates: list[tuple[int, list[str]]] = []
     for idx, row in enumerate(rows[:max_scan]):
         filled = [clean_text(c) for c in row if clean_text(c)]
-        if len(filled) < 2:
+        if len(filled) >= 2:
+            candidates.append((idx, filled))
+    if not candidates:
+        return 0
+    widest = max(len(filled) for _, filled in candidates)
+    for idx, filled in candidates:
+        if len(filled) < max(2, round(0.5 * widest)):
             continue
-        texts = [c for c in filled if not _NUMERIC.match(c)]
-        if len(texts) / len(filled) < 0.6:
+        if any(_NUMERIC.match(c) for c in filled):
             continue
-        score = len(texts) * 2 + len(filled)
-        if score > best_score:
-            best_idx, best_score = idx, score
-    return best_idx
+        if len({c.casefold() for c in filled}) != len(filled):
+            continue
+        return idx
+    best = max(
+        candidates,
+        key=lambda item: (sum(1 for c in item[1] if not _NUMERIC.match(c)), len(item[1]), -item[0]),
+    )
+    return best[0]
 
 
 def unique_headers(raw: Iterable[str]) -> list[str]:
-    """Nomes de coluna não vazios e únicos. Vazios viram 'Coluna N'; repetidos ganham sufixo."""
-    seen: dict[str, int] = {}
+    """Nomes não vazios e únicos, sem diferença de caixa.
+
+    Vazio vira 'Coluna N'. Repetido ganha sufixo '(n)' com o menor n que não colide com nenhum
+    nome já usado, inclusive nomes originais como 'A (2)'.
+    """
+    used: set[str] = set()
     out: list[str] = []
     for position, name in enumerate(raw, start=1):
         base = clean_text(name) or f"Coluna {position}"
-        count = seen.get(base, 0) + 1
-        seen[base] = count
-        out.append(base if count == 1 else f"{base} ({count})")
+        candidate = base
+        counter = 2
+        while candidate.casefold() in used:
+            candidate = f"{base} ({counter})"
+            counter += 1
+        used.add(candidate.casefold())
+        out.append(candidate)
     return out
 
 
@@ -125,6 +192,15 @@ def exact_code_duplicates(items: Sequence[tuple[int, str]]) -> list[DuplicateGro
     ]
 
 
+def _check_candidate_cap(count: int) -> None:
+    """Limita a memória: candidatos além de MAX_CANDIDATE_PAIRS são recusados."""
+    if count > MAX_CANDIDATE_PAIRS:
+        raise DomainError(
+            f"Muitos candidatos (mais de {MAX_CANDIDATE_PAIRS}). "
+            "Filtre o conjunto antes de comparar."
+        )
+
+
 @dataclass(frozen=True)
 class LeadingZeroSuspicion:
     """Dois códigos diferentes que só diferem por zeros à esquerda. Exige revisão humana."""
@@ -147,6 +223,7 @@ def leading_zero_suspicions(codes: Iterable[str]) -> list[LeadingZeroSuspicion]:
         for i, a in enumerate(ordered):
             for b in ordered[i + 1 :]:
                 out.append(LeadingZeroSuspicion(key_a=a, key_b=b))
+                _check_candidate_cap(len(out))
     return out
 
 
@@ -159,9 +236,12 @@ class SimilarPair:
     score: float
     shared_tokens: list[str]
     reason: str
+    spec_match: bool
 
 
-def _reason(norm_a: str, norm_b: str) -> str:
+def _reason(norm_a: str, norm_b: str, spec_match: bool) -> str:
+    if not spec_match:
+        return "especificações diferentes: não considerar equivalente"
     if norm_a == norm_b:
         return "descrição idêntica"
     if sorted(norm_a.split()) == sorted(norm_b.split()):
@@ -169,51 +249,86 @@ def _reason(norm_a: str, norm_b: str) -> str:
     return "texto semelhante"
 
 
+def _add_group_pairs(members: list[int], pairs: set[tuple[int, int]]) -> None:
+    """Acrescenta pares do grupo. Para ao atingir MAX_CANDIDATE_PAIRS (memória limitada)."""
+    for a_pos, i in enumerate(members):
+        for j in members[a_pos + 1 :]:
+            pairs.add((i, j) if i < j else (j, i))
+            if len(pairs) > MAX_CANDIDATE_PAIRS:
+                raise DomainError(
+                    f"Muitos candidatos de comparação (mais de {MAX_CANDIDATE_PAIRS}). "
+                    "Filtre o conjunto antes de comparar."
+                )
+
+
 def similar_descriptions(
     items: Sequence[tuple[int, str]],
     threshold: float = 0.85,
     max_items: int = 5000,
 ) -> list[SimilarPair]:
-    """Pares de descrições semelhantes, com score (0 a 1) e evidência.
+    """Pares de descrições semelhantes, com score (0 a 1), evidência e flag de especificação.
 
-    - Candidatos vêm de um índice invertido por token: descrições que compartilham um token
-      (independentemente da ordem) são comparadas. Tokens presentes em mais de
-      MAX_TOKEN_DOCUMENT_FREQUENCY descrições não geram candidatos.
-    - Score = maior entre a razão de similaridade do texto na ordem original e a razão com os
-      termos ordenados. Assim 'M8 PARAFUSO' e 'PARAFUSO M8' têm score 1.0.
-    - Sem equivalência automática: o resultado é sugestão para revisão humana.
+    Candidatos:
+    1. Descrições idênticas e descrições com os mesmos termos (independe da frequência de tokens).
+    2. Índice invertido por token. Tokens em mais de MAX_TOKEN_DOCUMENT_FREQUENCY descrições são
+       ignorados para candidatos (limitação documentada).
+    Score = maior entre a similaridade do texto e a dos termos ordenados.
+    Pares com especificações técnicas diferentes (números, unidades, símbolos) aparecem com
+    spec_match=False e nunca são tratados como equivalentes.
     """
     if len(items) > max_items:
         raise DomainError(
             f"Comparação aproximada limitada a {max_items} descrições. "
             "Filtre o conjunto antes de comparar."
         )
-    prepared: list[tuple[int, str, str, str, frozenset[str]]] = []
+    prepared: list[tuple[int, str, str, str, frozenset[str], tuple[str, ...]]] = []
     for row, value in items:
         cleaned = clean_text(value)
         if not cleaned:
             continue
         norm = normalize_description(cleaned)
         tokens = norm.split()
-        prepared.append((row, cleaned, norm, " ".join(sorted(tokens)), frozenset(tokens)))
+        prepared.append(
+            (
+                row,
+                cleaned,
+                norm,
+                " ".join(sorted(tokens)),
+                frozenset(tokens),
+                spec_signature(tokens),
+            )
+        )
+
+    candidate_pairs: set[tuple[int, int]] = set()
+    by_norm: dict[str, list[int]] = {}
+    by_sorted: dict[str, list[int]] = {}
+    for position, entry in enumerate(prepared):
+        by_norm.setdefault(entry[2], []).append(position)
+        by_sorted.setdefault(entry[3], []).append(position)
+    for groups in (by_norm, by_sorted):
+        for members in groups.values():
+            if len(members) > 1:
+                _add_group_pairs(members, candidate_pairs)
 
     index: dict[str, list[int]] = {}
     for position, entry in enumerate(prepared):
         for token in entry[4]:
             index.setdefault(token, []).append(position)
-
-    candidate_pairs: set[tuple[int, int]] = set()
     for members in index.values():
-        if len(members) > MAX_TOKEN_DOCUMENT_FREQUENCY:
-            continue
-        for a_pos, i in enumerate(members):
-            for j in members[a_pos + 1 :]:
-                candidate_pairs.add((i, j) if i < j else (j, i))
+        if len(members) <= MAX_TOKEN_DOCUMENT_FREQUENCY:
+            _add_group_pairs(members, candidate_pairs)
+
+    if len(candidate_pairs) > MAX_CANDIDATE_PAIRS:
+        raise DomainError(
+            f"Muitos candidatos de comparação ({len(candidate_pairs)}). "
+            "Filtre o conjunto antes de comparar."
+        )
 
     pairs: list[SimilarPair] = []
     for i, j in candidate_pairs:
-        row_i, value_i, norm_i, sorted_i, tokens_i = prepared[i]
-        row_j, value_j, norm_j, sorted_j, tokens_j = prepared[j]
+        row_i, value_i, norm_i, sorted_i, tokens_i, spec_i = prepared[i]
+        row_j, value_j, norm_j, sorted_j, tokens_j, spec_j = prepared[j]
+        spec_match = spec_i == spec_j
         if norm_i == norm_j:
             score = 1.0
         else:
@@ -231,7 +346,8 @@ def similar_descriptions(
                 value_b=value_j,
                 score=round(score, 4),
                 shared_tokens=sorted(tokens_i & tokens_j),
-                reason=_reason(norm_i, norm_j),
+                reason=_reason(norm_i, norm_j, spec_match),
+                spec_match=spec_match,
             )
         )
     pairs.sort(key=lambda p: (-p.score, p.row_a, p.row_b))
@@ -263,6 +379,7 @@ def compare_codes(left: Iterable[str], right: Iterable[str]) -> CodeComparison:
         for other in sorted(right_by_group.get(zero_group(key), [])):
             if other != key:
                 candidates.append((key, other))
+                _check_candidate_cap(len(candidates))
 
     return CodeComparison(
         only_left=sorted(left_keys - right_keys),
