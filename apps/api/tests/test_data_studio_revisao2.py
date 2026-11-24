@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from engiflow_api.application import data_studio as ds
@@ -25,7 +25,7 @@ from engiflow_api.domain.tabular import (
     spec_signature,
     unique_headers,
 )
-from engiflow_api.infrastructure.models import Base, Dataset, DatasetRow
+from engiflow_api.infrastructure.models import Dataset, DatasetRow
 from engiflow_api.infrastructure.readers import ImportLimits
 
 SYN_CSV = "SYN-Código;SYN-Descrição\n00123;SYN parafuso m8\n0123;SYN parafuso m8\n".encode()
@@ -149,16 +149,16 @@ def test_worst_case_is_refused_with_bounded_pairs(monkeypatch: pytest.MonkeyPatc
 # ---------- 5. importações simultâneas do mesmo arquivo ----------
 
 
-def test_concurrent_imports_of_same_file_create_exactly_one_dataset(tmp_path: Path) -> None:
+def test_concurrent_imports_of_same_file_create_exactly_one_dataset(
+    engine: Engine,
+    session_factory: sessionmaker,  # type: ignore[type-arg]
+    tmp_path: Path,
+) -> None:
     """Quatro pedidos simultâneos com o mesmo conteúdo: um registro, um arquivo, nenhum temporário.
-    Em SQLite (escrita serializada). Comportamento em PostgreSQL: pendente (ver status)."""
-    db_file = tmp_path / "concurrent.db"
-    engine = create_engine(
-        f"sqlite:///{db_file.as_posix()}",
-        connect_args={"timeout": 30, "check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    Roda contra o banco configurado em ENGIFLOW_TEST_DATABASE_URL (PostgreSQL 17 no CI) ou,
+    na ausência dela, SQLite. Os dois resultados são evidências distintas: ver FASE_2_STATUS.md.
+    """
     storage = tmp_path / "originals"
     storage.mkdir()
     digest = hashlib.sha256(SYN_CSV).hexdigest()
@@ -171,7 +171,7 @@ def test_concurrent_imports_of_same_file_create_exactly_one_dataset(tmp_path: Pa
         temp.write_bytes(SYN_CSV)
         barrier.wait()
         try:
-            with factory() as db:
+            with session_factory() as db:
                 result = ds.import_upload(
                     db,
                     actor="t@example.com",
@@ -194,17 +194,18 @@ def test_concurrent_imports_of_same_file_create_exactly_one_dataset(tmp_path: Pa
     for t in threads:
         t.join(timeout=120)
 
-    with factory() as db:
+    with session_factory() as db:
         datasets = db.scalar(select(func.count()).select_from(Dataset))
+        rows = db.scalar(select(func.count()).select_from(DatasetRow))
     finals = [p for p in storage.iterdir() if not p.name.startswith(".tmp-")]
     temps = [p for p in storage.iterdir() if p.name.startswith(".tmp-")]
     assert errors == [], f"erros inesperados: {errors!r}"
     assert datasets == 1
+    assert rows == 2  # linhas do arquivo: nenhuma duplicada pelos pedidos concorrentes
     assert results.count(True) == 1
     assert len(finals) == 1 and finals[0].name == f"{digest}.csv"
     assert finals[0].read_bytes() == SYN_CSV
     assert temps == []
-    engine.dispose()
 
 
 # ---------- 6. preservação de especificações técnicas ----------
@@ -255,15 +256,16 @@ def test_spec_signature_keeps_symbols_and_units() -> None:
 # ---------- 7. persistência após reinício ----------
 
 
-def test_original_file_and_rows_survive_restart(tmp_path: Path) -> None:
-    """Arquivo original e linhas continuam disponíveis após fechar e reabrir a conexão."""
-    db_file = tmp_path / "restart.db"
+def test_original_file_and_rows_survive_restart(
+    engine: Engine, database_url: str, tmp_path: Path
+) -> None:
+    """Arquivo original e linhas continuam disponíveis após fechar e reabrir a conexão.
+
+    Usa o banco configurado (PostgreSQL no CI quando ENGIFLOW_TEST_DATABASE_URL está definida).
+    """
     storage = tmp_path / "originals"
     storage.mkdir()
     digest = hashlib.sha256(SYN_CSV).hexdigest()
-
-    engine = create_engine(f"sqlite:///{db_file.as_posix()}")
-    Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     temp = storage / f".tmp-{uuid.uuid4().hex}"
     temp.write_bytes(SYN_CSV)
@@ -281,7 +283,7 @@ def test_original_file_and_rows_survive_restart(tmp_path: Path) -> None:
         )
     engine.dispose()  # simula reinício: nenhuma conexão ou objeto em memória sobrevive
 
-    engine2 = create_engine(f"sqlite:///{db_file.as_posix()}")
+    engine2 = create_engine(database_url)
     factory2 = sessionmaker(bind=engine2, expire_on_commit=False)
     with factory2() as db:
         dataset = db.scalar(select(Dataset).where(Dataset.source_sha256 == digest))

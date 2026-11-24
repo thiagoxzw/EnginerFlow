@@ -32,3 +32,36 @@ dados/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# CAD e arquivos de engenharia (dados reais ficam fora do repositório, ADR-0011)
+*.asm
+*.par
+*.psm
+*.dft
+*.cfg
+*.prt
+*.sldprt
+*.sldasm
+*.ipt
+*.iam
+*.dwg
+*.step
+*.stp
+
+# Bancos locais, armazenamento e backups
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.dump
+originals/
+data/
+*.zip
+*.7z
+*.rar
+
+# Credenciais e configurações locais
+.env.local
+*.pfx
+*.p12
+secrets.*

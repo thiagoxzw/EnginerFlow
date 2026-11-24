@@ -8,6 +8,15 @@ Formato: Keep a Changelog. Versionamento: Semantic Versioning (ainda sem versão
 - Fase 0: documentação de visão, PRD, arquitetura e decisões (ADR-0001 a ADR-0012), revisadas para uso individual.
 - Fase 1 (em verificação): backend FastAPI com health e readiness; login de usuário único com sessão em cookie HttpOnly; logout; auditoria de login e logout; dashboard com dados reais; erros em Problem Details; correlação de requisições; migração inicial; frontend Next.js com login e dashboard; `docker-compose.yml` com PostgreSQL; CI no GitHub Actions.
 
+### Corrigido (verificação adicional da Fase 2A)
+- Cabeçalhos gerados nunca colidem com nomes existentes; comparação sem diferença de caixa.
+- Detecção de cabeçalho: primeira linha plausível, não a mais preenchida.
+- Descrições idênticas com tokens frequentes são comparadas.
+- Teto de candidatos aplicado durante a geração (pior caso: 371 MB para 37 MB), também na comparação por zeros.
+- Especificações técnicas preservadas (símbolos, vírgula decimal, unidades); pares com especificação diferente nunca são equivalentes.
+- Testes de concorrência e reinício usam o banco configurado (PostgreSQL no CI).
+- `.gitignore` cobre CAD, bancos locais, armazenamento e segredos.
+
 ### Corrigido (revisão técnica da Fase 2)
 - Comparação por zeros à esquerda: nenhum candidato perdido (várias variantes, chaves em ambos os lados, códigos só de zeros). A API não corta mais as listas.
 - Importação em streaming: arquivo lido do disco linha a linha e gravado em lotes.

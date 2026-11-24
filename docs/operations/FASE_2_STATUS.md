@@ -138,6 +138,35 @@ Cada item foi reproduzido com um script antes da correção. Os testes de regres
 5. **Memória das exportações e da análise de duplicatas segue não medida** para volumes grandes.
 6. **Um título com duas células textuais antes do cabeçalho** pode ser escolhido como cabeçalho.
 
-### CI do PR #1
+### Homologação no GitHub Actions (PR #1)
 
-O PR #1 foi criado. Os dois jobs do GitHub Actions falharam antes de iniciar os passos, com a mensagem de que a conta tem pagamento ou limite de gasto pendente. Isso bloqueia a validação em PostgreSQL 17, a migração 0002 no CI e a suíte completa no ambiente de CI. **Pendente** até a cobrança ser regularizada.
+O repositório foi tornado público pelo responsável, e a cobrança que bloqueava os jobs deixou de se aplicar.
+
+| Execução | Commit | API (Python) | Web (TypeScript) |
+|---|---|---|---|
+| 45475952114 (reexecução) | 9188e91 | **sucesso** (todos os passos: dependências com lock, ruff, mypy strict, migrações upgrade/downgrade/upgrade, testes) | **sucesso** (install, typecheck, lint, teste, build) |
+
+- A suíte da API rodou no job com **PostgreSQL 17** (serviço do CI, `ENGIFLOW_TEST_DATABASE_URL` definida). Esta é a evidência em PostgreSQL da migração 0002 e dos testes da API.
+- Os 89 testes da API passaram localmente; no CI, a execução do commit 9188e91 concluiu com sucesso.
+- **Concorrência e persistência em PostgreSQL:** os testes foram reescritos para usar o banco configurado. A execução deste commit (ver histórico do PR) é que valida essa parte em PostgreSQL. Até essa execução concluir, ela figura como pendente.
+- Ausência de avisos de depreciação: verificada nas anotações da execução (ver seção de revisão de segurança e CI).
+
+### Revisão de segurança do repositório público
+
+Resumo em `docs/security/REVISAO_REPO_PUBLICO.md`:
+- Nenhum arquivo de dados, CAD, banco local ou segredo versionado, no HEAD e no histórico.
+- Nenhum padrão de credencial encontrado no histórico.
+- Exposição: o e-mail pessoal do autor está visível nos commits. Não foi reescrito o histórico; a decisão está documentada.
+
+### Limitações restantes
+
+1. Medições de desempenho em 100 mil e 500 mil linhas ainda não foram feitas (dependem da Fase 2B.4).
+2. Concorrência: a validação em PostgreSQL depende da execução do CI deste commit.
+3. Os limites de capacidade (100 MB, 500 mil linhas, 300 mil candidatos) são configuração, não capacidade comprovada.
+4. Sinônimos e equivalência técnica não são reconhecidos automaticamente.
+5. Um título com duas células textuais antes do cabeçalho ainda pode ser escolhido como cabeçalho.
+6. Exportações e análise de duplicatas não foram medidas em memória para grandes volumes.
+
+## Planejamento da Fase 2B
+
+Ver `docs/roadmap/FASE_2B_PLANO.md` (revisão 2): quatro entregas independentes (2B.1 a 2B.4), versionamento de metadados, hashes canônicos separados por finalidade, idempotência, concorrência otimista, limites de complexidade, retenção que preserva versões referenciadas, e 27 critérios de aceitação. **Não iniciada.** Aguarda autorização e merge.
