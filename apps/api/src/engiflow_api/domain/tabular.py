@@ -3,9 +3,9 @@
 Decisões (ADR-0008, ADR-0006, PRD RF-04 a RF-07):
 - Códigos são sempre texto. Nunca convertidos para número, zeros à esquerda são preservados.
 - Comparação de códigos usa chave sem diferença de caixa nem espaços nas bordas.
-  Zeros são preservados.
-- Zeros à esquerda diferentes são apenas *sugestão* de equivalência, nunca fusão automática.
-- Descrições semelhantes geram sugestão com score e evidências. Sem equivalência automática.
+  Zeros são preservados na chave.
+- Códigos que diferem só por zeros à esquerda são *sugestão* de equivalência, nunca fusão.
+- Descrições semelhantes geram sugestão com score e evidência. Sem equivalência automática.
 """
 
 from __future__ import annotations
@@ -22,7 +22,10 @@ CANONICAL_FIELDS: tuple[str, ...] = ("code", "description", "unit", "quantity", 
 
 _WS = re.compile(r"\s+")
 _NUMERIC = re.compile(r"^[+-]?\d+([.,]\d+)?$")
-_BLOCK_PREFIX = 3
+_TOKEN = re.compile(r"[a-z0-9]+")
+# Tokens presentes em muitas descrições geram pares demais. Acima deste número de ocorrências,
+# o token não é usado para gerar candidatos (ver limitação em FASE_2_STATUS.md).
+MAX_TOKEN_DOCUMENT_FREQUENCY = 500
 
 
 @dataclass(frozen=True)
@@ -51,11 +54,21 @@ def code_key(value: str) -> str:
     return normalize_code(value).upper()
 
 
+def zero_group(key: str) -> str:
+    """Grupo de códigos que diferem só por zeros à esquerda. '000' e '0' pertencem ao grupo '0'."""
+    stripped = key.lstrip("0")
+    return stripped if stripped else "0"
+
+
 def normalize_description(value: str) -> str:
-    """Descrição normalizada: sem acentos, caixa baixa, espaços colapsados."""
+    """Descrição normalizada: sem acentos, caixa baixa, pontuação removida, espaços colapsados."""
     decomposed = unicodedata.normalize("NFKD", clean_text(value))
     stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return stripped.casefold()
+    return " ".join(_TOKEN.findall(stripped.casefold()))
+
+
+def description_tokens(value: str) -> list[str]:
+    return normalize_description(value).split()
 
 
 def detect_header_index(rows: Sequence[Sequence[str]], max_scan: int = 20) -> int:
@@ -121,16 +134,15 @@ class LeadingZeroSuspicion:
 
 
 def leading_zero_suspicions(codes: Iterable[str]) -> list[LeadingZeroSuspicion]:
-    by_stripped: dict[str, set[str]] = {}
+    """Todos os pares de chaves distintas que pertencem ao mesmo grupo de zeros."""
+    by_group: dict[str, set[str]] = {}
     for raw in codes:
         if not clean_text(raw):
             continue
         key = code_key(raw)
-        stripped = key.lstrip("0")
-        if stripped:
-            by_stripped.setdefault(stripped, set()).add(key)
+        by_group.setdefault(zero_group(key), set()).add(key)
     out: list[LeadingZeroSuspicion] = []
-    for keys in by_stripped.values():
+    for keys in by_group.values():
         ordered = sorted(keys)
         for i, a in enumerate(ordered):
             for b in ordered[i + 1 :]:
@@ -146,6 +158,15 @@ class SimilarPair:
     value_b: str
     score: float
     shared_tokens: list[str]
+    reason: str
+
+
+def _reason(norm_a: str, norm_b: str) -> str:
+    if norm_a == norm_b:
+        return "descrição idêntica"
+    if sorted(norm_a.split()) == sorted(norm_b.split()):
+        return "mesmos termos em outra ordem"
+    return "texto semelhante"
 
 
 def similar_descriptions(
@@ -153,46 +174,66 @@ def similar_descriptions(
     threshold: float = 0.85,
     max_items: int = 5000,
 ) -> list[SimilarPair]:
-    """Pares de descrições semelhantes, com score (0 a 1) e tokens em comum como evidência.
+    """Pares de descrições semelhantes, com score (0 a 1) e evidência.
 
-    Usa blocagem pelos primeiros caracteres para não comparar todos contra todos. Isso perde
-    pares cujos prefixos diferem (ex.: 'M8 PARAFUSO' x 'PARAFUSO M8'); a limitação está documentada.
+    - Candidatos vêm de um índice invertido por token: descrições que compartilham um token
+      (independentemente da ordem) são comparadas. Tokens presentes em mais de
+      MAX_TOKEN_DOCUMENT_FREQUENCY descrições não geram candidatos.
+    - Score = maior entre a razão de similaridade do texto na ordem original e a razão com os
+      termos ordenados. Assim 'M8 PARAFUSO' e 'PARAFUSO M8' têm score 1.0.
+    - Sem equivalência automática: o resultado é sugestão para revisão humana.
     """
     if len(items) > max_items:
         raise DomainError(
             f"Comparação aproximada limitada a {max_items} descrições. "
             "Filtre o conjunto antes de comparar."
         )
-    prepared = [
-        (row, clean_text(value), normalize_description(value))
-        for row, value in items
-        if clean_text(value)
-    ]
-    blocks: dict[str, list[int]] = {}
-    for index, (_, _, norm) in enumerate(prepared):
-        blocks.setdefault(norm[:_BLOCK_PREFIX], []).append(index)
+    prepared: list[tuple[int, str, str, str, frozenset[str]]] = []
+    for row, value in items:
+        cleaned = clean_text(value)
+        if not cleaned:
+            continue
+        norm = normalize_description(cleaned)
+        tokens = norm.split()
+        prepared.append((row, cleaned, norm, " ".join(sorted(tokens)), frozenset(tokens)))
+
+    index: dict[str, list[int]] = {}
+    for position, entry in enumerate(prepared):
+        for token in entry[4]:
+            index.setdefault(token, []).append(position)
+
+    candidate_pairs: set[tuple[int, int]] = set()
+    for members in index.values():
+        if len(members) > MAX_TOKEN_DOCUMENT_FREQUENCY:
+            continue
+        for a_pos, i in enumerate(members):
+            for j in members[a_pos + 1 :]:
+                candidate_pairs.add((i, j) if i < j else (j, i))
 
     pairs: list[SimilarPair] = []
-    for members in blocks.values():
-        for a_pos, i in enumerate(members):
-            row_i, value_i, norm_i = prepared[i]
-            tokens_i = set(norm_i.split())
-            for j in members[a_pos + 1 :]:
-                row_j, value_j, norm_j = prepared[j]
-                score = 1.0 if norm_i == norm_j else SequenceMatcher(None, norm_i, norm_j).ratio()
-                if score < threshold:
-                    continue
-                shared = sorted(tokens_i & set(norm_j.split()))
-                pairs.append(
-                    SimilarPair(
-                        row_a=row_i,
-                        row_b=row_j,
-                        value_a=value_i,
-                        value_b=value_j,
-                        score=round(score, 4),
-                        shared_tokens=shared,
-                    )
-                )
+    for i, j in candidate_pairs:
+        row_i, value_i, norm_i, sorted_i, tokens_i = prepared[i]
+        row_j, value_j, norm_j, sorted_j, tokens_j = prepared[j]
+        if norm_i == norm_j:
+            score = 1.0
+        else:
+            score = max(
+                SequenceMatcher(None, norm_i, norm_j).ratio(),
+                SequenceMatcher(None, sorted_i, sorted_j).ratio(),
+            )
+        if score < threshold:
+            continue
+        pairs.append(
+            SimilarPair(
+                row_a=row_i,
+                row_b=row_j,
+                value_a=value_i,
+                value_b=value_j,
+                score=round(score, 4),
+                shared_tokens=sorted(tokens_i & tokens_j),
+                reason=_reason(norm_i, norm_j),
+            )
+        )
     pairs.sort(key=lambda p: (-p.score, p.row_a, p.row_b))
     return pairs
 
@@ -206,24 +247,26 @@ class CodeComparison:
 
 
 def compare_codes(left: Iterable[str], right: Iterable[str]) -> CodeComparison:
-    """Compara dois conjuntos de códigos pela chave de comparação (sem fusão automática)."""
+    """Compara dois conjuntos de códigos pela chave de comparação (sem fusão automática).
+
+    Candidatos por zeros à esquerda são calculados contra TODAS as chaves do outro lado
+    (inclusive as que existem nos dois lados), para não perder nenhuma sugestão.
+    """
     left_keys = {code_key(c) for c in left if clean_text(c)}
     right_keys = {code_key(c) for c in right if clean_text(c)}
-    only_left = sorted(left_keys - right_keys)
-    only_right = sorted(right_keys - left_keys)
-    right_by_stripped: dict[str, str] = {}
-    for key in only_right:
-        stripped = key.lstrip("0")
-        if stripped:
-            right_by_stripped.setdefault(stripped, key)
+    right_by_group: dict[str, list[str]] = {}
+    for key in right_keys:
+        right_by_group.setdefault(zero_group(key), []).append(key)
+
     candidates: list[tuple[str, str]] = []
-    for key in only_left:
-        stripped = key.lstrip("0")
-        if stripped and stripped in right_by_stripped:
-            candidates.append((key, right_by_stripped[stripped]))
+    for key in sorted(left_keys):
+        for other in sorted(right_by_group.get(zero_group(key), [])):
+            if other != key:
+                candidates.append((key, other))
+
     return CodeComparison(
-        only_left=only_left,
-        only_right=only_right,
+        only_left=sorted(left_keys - right_keys),
+        only_right=sorted(right_keys - left_keys),
         in_both=sorted(left_keys & right_keys),
         leading_zero_candidates=candidates,
     )

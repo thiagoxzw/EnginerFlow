@@ -8,7 +8,16 @@ Formato: Keep a Changelog. Versionamento: Semantic Versioning (ainda sem versão
 - Fase 0: documentação de visão, PRD, arquitetura e decisões (ADR-0001 a ADR-0012), revisadas para uso individual.
 - Fase 1 (em verificação): backend FastAPI com health e readiness; login de usuário único com sessão em cookie HttpOnly; logout; auditoria de login e logout; dashboard com dados reais; erros em Problem Details; correlação de requisições; migração inicial; frontend Next.js com login e dashboard; `docker-compose.yml` com PostgreSQL; CI no GitHub Actions.
 
+### Corrigido (revisão técnica da Fase 2)
+- Comparação por zeros à esquerda: nenhum candidato perdido (várias variantes, chaves em ambos os lados, códigos só de zeros). A API não corta mais as listas.
+- Importação em streaming: arquivo lido do disco linha a linha e gravado em lotes.
+- Similaridade de descrições independente da ordem dos termos e da pontuação.
+- Consistência arquivo x transação: escrita temporária, rollback e remoção do arquivo órfão.
+- Leitura XLSX por handle (não depende da extensão do arquivo).
+
 ### Adicionado (Fase 2 — Data Studio)
+- Exportação de tabela, duplicatas e comparação em CSV e XLSX, com códigos como texto.
+- Script de medição `apps/api/scripts/bench_data_studio.py` (manual, fora do CI).
 - Importação de CSV e XLSX com detecção de delimitador, encoding (UTF-8 e Windows-1252), aba e cabeçalho.
 - Códigos como texto, com zeros à esquerda preservados; aviso quando o Excel já converteu códigos em número.
 - Mapeamento de colunas para campos canônicos, validado e auditado.

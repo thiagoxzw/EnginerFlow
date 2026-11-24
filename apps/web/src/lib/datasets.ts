@@ -112,3 +112,50 @@ export function compareDatasets(leftId: string, rightId: string): Promise<Compar
     body: JSON.stringify({ left_id: leftId, right_id: rightId }),
   });
 }
+
+export type ExportFormat = "csv" | "xlsx";
+
+/** Extrai o nome do arquivo de um cabeçalho Content-Disposition. Retorna null se ausente. */
+export function filenameFromDisposition(header: string | null): string | null {
+  if (!header) {
+    return null;
+  }
+  const match = /filename="([^"]+)"/i.exec(header);
+  return match?.[1] ?? null;
+}
+
+/** Baixa um arquivo exportado pela API (mesma origem, com cookie de sessão). */
+export async function downloadExport(
+  path: string,
+  format: ExportFormat,
+  init: RequestInit = {},
+): Promise<void> {
+  const response = await fetch(`${path}${path.includes("?") ? "&" : "?"}format=${format}`, {
+    ...init,
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    throw new Error(`Exportação falhou (HTTP ${response.status}).`);
+  }
+  const blob = await response.blob();
+  const name =
+    filenameFromDisposition(response.headers.get("Content-Disposition")) ?? `resultado.${format}`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function exportDatasetPath(id: string): string {
+  return `/api/v1/datasets/${id}/export`;
+}
+
+export function exportDuplicatesPath(id: string, threshold: number): string {
+  return `/api/v1/datasets/${id}/duplicates/export?threshold=${threshold}&descriptions=true`;
+}
+
+export const EXPORT_COMPARE_PATH = "/api/v1/datasets/compare/export";

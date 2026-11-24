@@ -7,14 +7,19 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api";
 import {
   CANONICAL_FIELDS,
+  EXPORT_COMPARE_PATH,
   FIELD_LABELS,
   buildMappingPayload,
   compareDatasets,
+  downloadExport,
+  exportDatasetPath,
+  exportDuplicatesPath,
   getDataset,
   getDuplicates,
   listDatasets,
   saveMapping,
   uploadDataset,
+  type ExportFormat,
   type CanonicalField,
   type CompareOut,
   type DatasetSummary,
@@ -258,6 +263,11 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
         </div>
       </section>
 
+      <ExportButtons
+        label="Exportar tabela"
+        onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}
+      />
+
       <DuplicatesSection datasetId={datasetId} hasCodeMapping={Boolean(data.mapping.code)} />
     </div>
   );
@@ -387,6 +397,10 @@ function DuplicatesSection({
       {report.data ? (
         <div className="space-y-4 text-sm">
           <p className="text-[var(--color-muted)]">{report.data.note}</p>
+          <ExportButtons
+            label="Exportar duplicatas"
+            onExport={(fmt) => downloadExport(exportDuplicatesPath(datasetId, threshold), fmt)}
+          />
 
           <div>
             <h3 className="font-medium">Códigos repetidos (mesma chave)</h3>
@@ -493,6 +507,16 @@ function CompareSection({ datasets }: { datasets: DatasetSummary[] }) {
       {compare.data ? (
         <div className="space-y-3 text-sm">
           <p className="text-[var(--color-muted)]">{compare.data.note}</p>
+          <ExportButtons
+            label="Exportar comparação"
+            onExport={(fmt) =>
+              downloadExport(EXPORT_COMPARE_PATH, fmt, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ left_id: left, right_id: right }),
+              })
+            }
+          />
           <ul className="list-inside list-disc">
             <li>Somente na tabela A: {compare.data.only_left_count}</li>
             <li>Somente na tabela B: {compare.data.only_right_count}</li>
@@ -542,6 +566,48 @@ function DatasetSelect({
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function ExportButtons({
+  label,
+  onExport,
+}: {
+  label: string;
+  onExport: (format: ExportFormat) => Promise<void>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const run = async (format: ExportFormat) => {
+    setError(null);
+    try {
+      await onExport(format);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-[var(--color-muted)]">{label}:</span>
+      <button
+        type="button"
+        onClick={() => void run("csv")}
+        className="rounded-md border border-[var(--color-border)] px-3 py-1 text-sm"
+      >
+        CSV
+      </button>
+      <button
+        type="button"
+        onClick={() => void run("xlsx")}
+        className="rounded-md border border-[var(--color-border)] px-3 py-1 text-sm"
+      >
+        XLSX
+      </button>
+      {error ? (
+        <span role="alert" className="text-sm text-[var(--color-danger)]">
+          {error}
+        </span>
+      ) : null}
     </div>
   );
 }
