@@ -46,6 +46,20 @@ Legenda: **Testado** = executado e observado nesta máquina · **Testado em CI**
 6. **Ainda não existe:** Data Studio, BOM Manager, Material Manager, importação Protheus, agente local, Solid Edge e workflows (fases seguintes).
 7. Mensagens de erro HTTP genéricas aparecem com título "Erro HTTP" (não localizado).
 
+## Manutenção de CI (Node 24)
+
+Commit `1bb4d16`, execução [45468093748](https://github.com/thiagoxzw/EnginerFlow/actions/runs/45468093748):
+
+| Job | Resultado |
+|---|---|
+| API (Python) | sucesso (lint, formatação, mypy, migrações, testes contra PostgreSQL 17) |
+| Web (TypeScript) | sucesso (install com lockfile, typecheck, lint, teste, build) |
+
+- Actions atualizadas: `actions/checkout@v6`, `astral-sh/setup-uv@v7`, `actions/setup-node@v6`, `pnpm/action-setup@v6`. Todas declaram `runs.using: node24`.
+- Anotações da execução: **0**. Nenhum aviso de depreciação do Node 20 foi reportado pelo GitHub.
+- Parâmetros mantidos e aceitos pelas novas versões: `enable-cache` e `cache-dependency-glob` (uv), `version` (pnpm), `cache` e `cache-dependency-path` (setup-node).
+- Versão do Node do build web (22) e comandos de teste inalterados.
+
 ## Migrações
 
 - `0001_initial`: `users`, `sessions` (token guardado só como hash SHA-256), `audit_logs` (append-only pela aplicação).
