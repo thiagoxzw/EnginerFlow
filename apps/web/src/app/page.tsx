@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
@@ -32,13 +33,21 @@ export default function DashboardPage() {
           <p className="text-sm text-[var(--color-muted)]">EngiFlow</p>
           <h1 className="text-2xl font-semibold">Dashboard</h1>
         </div>
-        <button
-          type="button"
-          onClick={onLogout}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/data-studio"
+            className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm"
+          >
+            Data Studio
+          </Link>
+          <button
+            type="button"
+            onClick={onLogout}
           className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm"
         >
-          Sair
-        </button>
+            Sair
+          </button>
+        </div>
       </header>
 
       {query.isPending ? (

@@ -36,3 +36,13 @@ Datas: **não definidas**. Dependem de decisões em `decisions/OPEN_QUESTIONS.md
 | 5 | Alta | disponibilidade de integração ERP |
 | 6 | Alta | estabilidade do executor |
 | 7 | Média-alta | qualidade e custo de IA |
+
+## Status atualizado (2026-11-24)
+
+| Fase | Estado | Evidência |
+|---|---|---|
+| 0 — Discovery e arquitetura | Concluída (documentação, ADRs 0001–0012 revisadas) | `docs/decisions/REVISAO_FASE_0.md` |
+| 1 — Foundation | Concluída, com PostgreSQL 17 validado pelo CI | `docs/operations/FASE_1_STATUS.md` |
+| 2A — Data Studio (importação, mapeamento, duplicatas, comparação, exportação) | Em homologação no PR #1 (CI verde no commit `b35f9fa`; sem merge) | `docs/operations/FASE_2_STATUS.md` |
+| 2B — Data Studio Advanced | Planejada em quatro entregas (2B.1 a 2B.4); **não iniciada**, aguarda autorização | `docs/roadmap/FASE_2B_PLANO.md` |
+| 3 — BOM Manager | Não iniciada (não autorizada) | — |
