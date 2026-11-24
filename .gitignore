@@ -1,0 +1,34 @@
+﻿# Dependencias e ambientes locais
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.next/
+dist/
+build/
+coverage/
+
+# Ambiente e segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dados reais: nunca versionar (ver ADR-0011)
+data/
+dados/
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.xlsx
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
