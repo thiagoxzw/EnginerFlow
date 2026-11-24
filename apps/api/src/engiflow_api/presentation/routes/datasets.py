@@ -27,7 +27,7 @@ from engiflow_api.core.config import get_settings
 from engiflow_api.domain.errors import DomainError
 from engiflow_api.domain.tabular import CodeComparison
 from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
-from engiflow_api.infrastructure.models import Dataset, DatasetRow
+from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
 from engiflow_api.infrastructure.readers import ImportLimits
 from engiflow_api.presentation.deps import CurrentUser, DbDep
 
@@ -70,7 +70,7 @@ class MappingIn(BaseModel):
 
 class RowOut(BaseModel):
     row_number: int
-    values: list[str]
+    values: list[str | None]
 
 
 class RowsOut(BaseModel):
@@ -219,9 +219,9 @@ def list_datasets(user: CurrentUser, db: DbDep) -> list[DatasetSummary]:
 def detail(dataset_id: str, user: CurrentUser, db: DbDep) -> DatasetDetail:
     dataset = get_dataset(db, dataset_id)
     preview_rows = db.execute(
-        select(DatasetRow.values)
-        .where(DatasetRow.dataset_id == dataset.id)
-        .order_by(DatasetRow.row_number)
+        select(DatasetVersionRow.values)
+        .where(DatasetVersionRow.version_id == dataset.current_version_id)
+        .order_by(DatasetVersionRow.row_number)
         .limit(_PREVIEW_ROWS)
     ).all()
     preview = [dict(zip(dataset.columns, values[0], strict=False)) for values in preview_rows]
@@ -240,14 +240,16 @@ def rows(
     dataset = get_dataset(db, dataset_id)
     total = (
         db.scalar(
-            select(func.count()).select_from(DatasetRow).where(DatasetRow.dataset_id == dataset.id)
+            select(func.count())
+            .select_from(DatasetVersionRow)
+            .where(DatasetVersionRow.version_id == dataset.current_version_id)
         )
         or 0
     )
     page = db.execute(
-        select(DatasetRow.row_number, DatasetRow.values)
-        .where(DatasetRow.dataset_id == dataset.id)
-        .order_by(DatasetRow.row_number)
+        select(DatasetVersionRow.row_number, DatasetVersionRow.values)
+        .where(DatasetVersionRow.version_id == dataset.current_version_id)
+        .order_by(DatasetVersionRow.row_number)
         .offset(offset)
         .limit(limit)
     ).all()

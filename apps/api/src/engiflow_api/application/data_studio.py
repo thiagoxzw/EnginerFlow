@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.application.audit import record_event
+from engiflow_api.domain.canonical import CanonicalHasher
 from engiflow_api.domain.errors import DomainError
 from engiflow_api.domain.tabular import (
     CANONICAL_FIELDS,
@@ -35,7 +37,12 @@ from engiflow_api.domain.tabular import (
     similar_descriptions,
     validate_mapping,
 )
-from engiflow_api.infrastructure.models import Dataset, DatasetRow
+from engiflow_api.infrastructure.models import (
+    Dataset,
+    DatasetMetadataVersion,
+    DatasetVersion,
+    DatasetVersionRow,
+)
 from engiflow_api.infrastructure.readers import (
     ImportLimits,
     detect_kind_file,
@@ -114,16 +121,42 @@ def import_upload(
             )
             db.add(dataset)
             db.flush()
+            # Versão 1 (original). O id da versão é o id da tabela.
+            version = DatasetVersion(
+                id=dataset.id,
+                dataset_id=dataset.id,
+                number=1,
+                parent_version_id=None,
+                row_count=0,
+                content_sha256="",
+                schema_version=1,
+                pinned=True,
+            )
+            db.add(version)
+            db.flush()
+            hasher = CanonicalHasher(stream.columns)
             batch: list[dict[str, Any]] = []
             count = 0
             for number, values in stream.rows:
-                batch.append({"dataset_id": dataset.id, "row_number": number, "values": values})
+                hasher.add_row(values)
+                batch.append({"version_id": version.id, "row_number": number, "values": values})
                 count += 1
                 if len(batch) >= INSERT_BATCH_SIZE:
-                    db.execute(insert(DatasetRow), batch)
+                    db.execute(insert(DatasetVersionRow), batch)
                     batch.clear()
             if batch:
-                db.execute(insert(DatasetRow), batch)
+                db.execute(insert(DatasetVersionRow), batch)
+            version.row_count = count
+            version.content_sha256 = hasher.hexdigest()
+            db.add(
+                DatasetMetadataVersion(
+                    id=str(uuid.uuid4()),
+                    version_id=version.id,
+                    columns=list(stream.columns),
+                    mapping={},
+                )
+            )
+            dataset.current_version_id = version.id
             dataset.row_count = count
             dataset.warnings = list(stream.warnings)
 
@@ -206,15 +239,28 @@ def _column_index(dataset: Dataset, field_name: str) -> int:
     return dataset.columns.index(column)
 
 
-def field_items(db: DbSession, dataset: Dataset, field_name: str) -> list[tuple[int, str]]:
-    """Pares (linha na origem, valor) do campo mapeado. Valores vazios são mantidos."""
-    index = _column_index(dataset, field_name)
+def _current_rows(db: DbSession, dataset: Dataset) -> list[tuple[int, list[str | None]]]:
+    if dataset.current_version_id is None:
+        raise DomainError("Tabela sem versão atual.")
     rows = db.execute(
-        select(DatasetRow.row_number, DatasetRow.values)
-        .where(DatasetRow.dataset_id == dataset.id)
-        .order_by(DatasetRow.row_number)
+        select(DatasetVersionRow.row_number, DatasetVersionRow.values)
+        .where(DatasetVersionRow.version_id == dataset.current_version_id)
+        .order_by(DatasetVersionRow.row_number)
     ).all()
-    return [(number, values[index] if index < len(values) else "") for number, values in rows]
+    return [(number, list(values)) for number, values in rows]
+
+
+def field_items(db: DbSession, dataset: Dataset, field_name: str) -> list[tuple[int, str]]:
+    """Pares (linha na origem, valor) do campo mapeado na versão atual.
+
+    Desconhecido (None) não é código nem descrição: entra como texto vazio na análise e
+    não é contado como zero.
+    """
+    index = _column_index(dataset, field_name)
+    return [
+        (number, (values[index] or "") if index < len(values) else "")
+        for number, values in _current_rows(db, dataset)
+    ]
 
 
 @dataclass(frozen=True)
@@ -251,12 +297,6 @@ def compare_datasets(db: DbSession, left: Dataset, right: Dataset) -> CodeCompar
     return compare_codes(left_codes, right_codes)
 
 
-def dataset_rows_iter(db: DbSession, dataset: Dataset) -> Iterable[tuple[int, list[str]]]:
-    """Linhas de uma tabela na ordem da origem, para exportação."""
-    result = db.execute(
-        select(DatasetRow.row_number, DatasetRow.values)
-        .where(DatasetRow.dataset_id == dataset.id)
-        .order_by(DatasetRow.row_number)
-    )
-    for number, values in result:
-        yield number, list(values)
+def dataset_rows_iter(db: DbSession, dataset: Dataset) -> Iterable[tuple[int, list[str | None]]]:
+    """Linhas da versão atual, na ordem da origem (valores None = desconhecido)."""
+    return _current_rows(db, dataset)
