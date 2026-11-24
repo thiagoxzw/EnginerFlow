@@ -76,6 +76,11 @@ Dados: **somente sintéticos** (prefixo `SYN-`).
 - Nenhuma anotação nas execuções (sem avisos de depreciação de Actions).
 - Execução anterior (`1d42470`, run 45480455872): falhou em PostgreSQL por um defeito real, corrigido em `3e86aa0` (ver CHANGELOG).
 
+### CI do commit `ebce18e` (execução 45481997573) — concluído com sucesso
+
+- API (Python): **sucesso**, **125 testes aprovados contra PostgreSQL 17**.
+- Web (TypeScript): **sucesso** (typecheck, lint, teste, build).
+
 ### Revisão de integridade (commit seguinte a `3e86aa0`)
 
 | # | Cenário | Cobertura | Teste |
