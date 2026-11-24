@@ -21,6 +21,7 @@ from engiflow_api.application.data_studio import get_dataset
 from engiflow_api.application.versioning import load_snapshot
 from engiflow_api.core.config import Settings
 from engiflow_api.domain.canonical import content_sha256
+from engiflow_api.domain.errors import ConflictError
 from engiflow_api.infrastructure.models import (
     Dataset,
     DatasetOperation,
@@ -377,3 +378,50 @@ def test_stored_hash_of_every_version_matches_its_rows(
             snap = load_snapshot(db, version.id)
             assert version.content_sha256 == content_sha256(snap.columns, rows)
             assert version.row_count == len(rows)
+
+
+def test_version_number_collision_is_reported_as_conflict_not_integrity_error(
+    session_factory: sessionmaker,  # type: ignore[type-arg]
+    logged_client: TestClient,
+    storage_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Duas aplicações concorrentes calculam o mesmo número de versão.
+
+    Defeito reproduzido: a violação de unicidade estourava como IntegrityError (HTTP 500),
+    fora do bloco que converte em ConflictError (409). Forçamos a colisão de forma determinística.
+    """
+    ds = _import(logged_client)
+    base = _current(logged_client, ds["id"])
+    p1 = _preview(
+        logged_client,
+        ds["id"],
+        "set_rows_value",
+        {"row_numbers": [2], "column": "Qtd", "value": "1"},
+        base,
+    )
+    p2 = _preview(
+        logged_client,
+        ds["id"],
+        "set_rows_value",
+        {"row_numbers": [3], "column": "Qtd", "value": "2"},
+        base,
+    )
+    # Primeira aplicação grava a versão 2 normalmente.
+    assert _apply(logged_client, ds["id"], p1["preview_id"], base).status_code == 201
+    # Segunda aplicação (base antiga) calcula o número 2 de novo: colisão com a versão já gravada.
+    monkeypatch.setattr(versioning, "_next_number", lambda db, dataset_id: 2)
+    with session_factory() as db:
+        dataset = get_dataset(db, ds["id"])
+        dataset.current_version_id = base  # simula a leitura concorrente feita com a base antiga
+        with pytest.raises(ConflictError):
+            versioning.apply_preview(
+                db,
+                dataset,
+                preview_id=p2["preview_id"],
+                base_version_id=base,
+                idempotency_key=None,
+                actor="t@example.com",
+                correlation_id=None,
+            )
+        db.rollback()

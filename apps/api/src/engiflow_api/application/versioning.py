@@ -323,15 +323,18 @@ def apply_preview(
         validate_mapping_safe(dataset.mapping, snapshot.columns), preview.code, preview.params
     )
     mapping = validate_mapping(mapping, result.snapshot.columns)
-    version = _write_version(
-        db,
-        dataset,
-        parent_id=base_version_id,
-        snapshot=result.snapshot,
-        mapping=mapping,
-        digest=digest,
-    )
-    _move_pointer(db, dataset, base_version_id=base_version_id, target=version, mapping=mapping)
+    try:
+        version = _write_version(
+            db,
+            dataset,
+            parent_id=base_version_id,
+            snapshot=result.snapshot,
+            mapping=mapping,
+            digest=digest,
+        )
+        _move_pointer(db, dataset, base_version_id=base_version_id, target=version, mapping=mapping)
+    except IntegrityError as exc:  # número de versão ou seq disputado por outro pedido
+        raise ConflictError("Operação concorrente detectada. Nada foi alterado.") from exc
     operation = DatasetOperation(
         dataset_id=dataset.id,
         seq=_next_seq(db, dataset.id),
