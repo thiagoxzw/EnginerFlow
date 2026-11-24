@@ -38,8 +38,8 @@ Legenda: **Testado** = executado e observado nesta máquina · **Testado em CI**
 
 ## Não verificado (limitações e bloqueios)
 
-1. **PostgreSQL real — não verificado.** O Docker Desktop não inicia: a virtualização está desligada na BIOS (`VirtualizationFirmwareEnabled: False`) e não há distribuição WSL. Ativar isso exige acesso administrativo ou ao BIOS. Tentei um PostgreSQL embarcado (npm `embedded-postgres` 17.12, sem administrador), mas o bloqueio automático de ações impediu a inicialização do servidor. A suíte de testes, a migração e o CI estão preparados para PostgreSQL (`ENGIFLOW_TEST_DATABASE_URL`), mas **nenhum deles rodou contra PostgreSQL ainda**.
-2. **CI no GitHub — não executado.** O workflow foi validado só como YAML. O repositório remoto ainda não existe.
+1. **PostgreSQL local — não verificado nesta máquina.** O Docker Desktop não inicia: a virtualização está desligada na BIOS (`VirtualizationFirmwareEnabled: False`) e não há distribuição WSL. Ativar isso exige acesso administrativo ou ao BIOS. Tentei um PostgreSQL embarcado, mas o bloqueio automático de ações impediu a inicialização do servidor. **Porém, a suíte de testes da API rodou contra PostgreSQL 17 real no GitHub Actions** (job "API (Python)" com serviço `postgres:17-alpine`, incluindo migrações upgrade/downgrade/upgrade), na execução do commit `ba79e58`: sucesso.
+2. **CI no GitHub — executado.** Repositório: https://github.com/thiagoxzw/EnginerFlow. Execução do commit `ba79e58` (Fase 1): API (Python) e Web (TypeScript) concluídos com sucesso. Execução do commit `1bb4d16` (atualização das actions para Node 24): ver seção "Manutenção de CI" abaixo.
 3. **Interface sem testes end-to-end automatizados.** Playwright não foi instalado nesta fase.
 4. **Sem gerenciamento de sessão por dispositivo, sem recuperação de senha.** Intencional para uso individual.
 5. **Dashboard** mostra apenas indicadores reais disponíveis nesta fase. Projetos, materiais, BOMs e automações aparecerão quando os módulos existirem.
