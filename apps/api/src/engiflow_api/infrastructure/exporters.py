@@ -30,12 +30,12 @@ def _csv_cell(value: str) -> str:
     return value
 
 
-def to_csv_bytes(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> bytes:
+def to_csv_bytes(headers: Sequence[str], rows: Sequence[Sequence[str | None]]) -> bytes:
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
     writer.writerow(headers)
     for row in rows:
-        writer.writerow([_csv_cell(str(cell)) for cell in row])
+        writer.writerow([_csv_cell("" if cell is None else str(cell)) for cell in row])
     return buffer.getvalue().encode("utf-8-sig")
 
 
@@ -43,7 +43,7 @@ def to_csv_bytes(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> bytes
 class Sheet:
     title: str
     headers: Sequence[str]
-    rows: Sequence[Sequence[str]]
+    rows: Sequence[Sequence[str | None]]
 
 
 def _safe_title(title: str, used: set[str]) -> str:
@@ -66,11 +66,11 @@ def to_xlsx_bytes(sheets: Sequence[Sheet]) -> bytes:
     used: set[str] = set()
     for sheet in sheets:
         worksheet = workbook.create_sheet(title=_safe_title(sheet.title, used))
-        all_rows: list[Sequence[str]] = [sheet.headers, *sheet.rows]
+        all_rows: list[Sequence[str | None]] = [sheet.headers, *sheet.rows]
         for row_index, row in enumerate(all_rows, start=1):
             for column_index, value in enumerate(row, start=1):
                 cell = worksheet.cell(row=row_index, column=column_index)
-                text = str(value)
+                text = "" if value is None else str(value)
                 cell.value = text
                 cell.data_type = "s"  # string explícita: nunca fórmula
                 cell.number_format = "@"  # formato Texto para o Excel não converter

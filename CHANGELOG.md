@@ -4,6 +4,12 @@ Formato: Keep a Changelog. Versionamento: Semantic Versioning (ainda sem versão
 
 ## [Unreleased]
 
+### Adicionado (Fase 2B.1 — Fundação das transformações)
+- Versionamento de tabelas com histórico imutável, prévia com validade e uso único, aplicação com guarda de versão base, idempotência, desfazer e refazer.
+- Capacidades reutilizáveis registradas: `rename_column`, `replace_text`, `set_rows_value`.
+- Hash canônico do conteúdo lógico; distinção entre vazio, desconhecido e zero.
+- Migração 0003 que preserva os dados da 2A como versão 1.
+
 ### Adicionado
 - Fase 0: documentação de visão, PRD, arquitetura e decisões (ADR-0001 a ADR-0012), revisadas para uso individual.
 - Fase 1 (em verificação): backend FastAPI com health e readiness; login de usuário único com sessão em cookie HttpOnly; logout; auditoria de login e logout; dashboard com dados reais; erros em Problem Details; correlação de requisições; migração inicial; frontend Next.js com login e dashboard; `docker-compose.yml` com PostgreSQL; CI no GitHub Actions.

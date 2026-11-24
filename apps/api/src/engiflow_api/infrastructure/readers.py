@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from pathlib import Path
+from typing import cast
 
 from openpyxl import load_workbook
 
@@ -47,7 +48,7 @@ class TableStream:
 
     columns: list[str]
     sheet: str | None
-    rows: Iterator[tuple[int, list[str]]]
+    rows: Iterator[tuple[int, list[str | None]]]
     # Preenchido ao final da leitura (avisos dependem do conteúdo lido).
     warnings: list[str] = field(default_factory=list)
 
@@ -103,32 +104,36 @@ def _sniff_delimiter(path: Path, encoding: str) -> str:
 
 
 def _build_stream(
-    raw: Iterator[tuple[int, list[str]]],
+    raw: Iterator[tuple[int, list[str | None]]],
     *,
     sheet: str | None,
     limits: ImportLimits,
     warnings: list[str],
 ) -> TableStream:
     """Consome só as primeiras linhas para achar o cabeçalho; o resto é streaming."""
-    head: list[tuple[int, list[str]]] = []
+    head: list[tuple[int, list[str | None]]] = []
     for item in raw:
         head.append(item)
         if len(head) >= _HEADER_SCAN:
             break
     if not head:
         raise DomainError("Arquivo sem conteúdo.")
-    header_index = detect_header_index([values for _, values in head])
-    header_cells = head[header_index][1]
+    header_index = detect_header_index([[c or "" for c in values] for _, values in head])
+    header_cells = [c or "" for c in head[header_index][1]]
     if len(header_cells) > limits.max_columns:
         raise DomainError(f"Tabela excede o limite de {limits.max_columns} colunas.")
     columns = unique_headers(header_cells)
     width = len(columns)
 
-    def rows() -> Iterator[tuple[int, list[str]]]:
+    def rows() -> Iterator[tuple[int, list[str | None]]]:
         emitted = 0
         pending = head[header_index + 1 :]
         for number, values in _chain(pending, raw):
-            cleaned = [clean_text(c) for c in (values + [""] * width)[:width]]
+            cleaned: list[str | None] = [
+                clean_text(c or "") if i < len(values) else None
+                for i, c in enumerate(values[:width])
+            ]
+            cleaned += [None] * (width - len(cleaned))  # célula ausente = desconhecido
             if not any(cleaned):
                 continue
             emitted += 1
@@ -140,15 +145,15 @@ def _build_stream(
 
 
 def _chain(
-    first: list[tuple[int, list[str]]], rest: Iterator[tuple[int, list[str]]]
-) -> Iterator[tuple[int, list[str]]]:
+    first: list[tuple[int, list[str | None]]], rest: Iterator[tuple[int, list[str | None]]]
+) -> Iterator[tuple[int, list[str | None]]]:
     yield from first
     yield from rest
 
 
 def _decode_guarded(
-    lines: Iterator[tuple[int, list[str]]],
-) -> Iterator[tuple[int, list[str]]]:
+    lines: Iterator[tuple[int, list[str | None]]],
+) -> Iterator[tuple[int, list[str | None]]]:
     try:
         yield from lines
     except UnicodeDecodeError as exc:
@@ -163,7 +168,9 @@ def open_csv(path: Path, limits: ImportLimits) -> Iterator[TableStream]:
     delimiter = _sniff_delimiter(path, encoding)
     with path.open("r", encoding=encoding, newline="") as fh:
         reader = csv.reader(fh, delimiter=delimiter)
-        raw = _decode_guarded((number, row) for number, row in enumerate(reader, start=1))
+        raw = _decode_guarded(
+            (number, cast(list[str | None], row)) for number, row in enumerate(reader, start=1)
+        )
         yield _build_stream(raw, sheet=None, limits=limits, warnings=[])
 
 
@@ -211,9 +218,9 @@ def open_xlsx(path: Path, sheet: str | None, limits: ImportLimits) -> Iterator[T
             warnings: list[str] = []
             numeric = [0]
 
-            def raw() -> Iterator[tuple[int, list[str]]]:
+            def raw() -> Iterator[tuple[int, list[str | None]]]:
                 for number, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
-                    cells: list[str] = []
+                    cells: list[str | None] = []
                     for value in row:
                         text, was_numeric = _cell_to_text(value)
                         numeric[0] += int(was_numeric)
@@ -223,7 +230,7 @@ def open_xlsx(path: Path, sheet: str | None, limits: ImportLimits) -> Iterator[T
             stream = _build_stream(raw(), sheet=target, limits=limits, warnings=warnings)
             body = stream.rows
 
-            def rows_then_warn() -> Iterator[tuple[int, list[str]]]:
+            def rows_then_warn() -> Iterator[tuple[int, list[str | None]]]:
                 yield from body
                 if numeric[0]:
                     warnings.append(

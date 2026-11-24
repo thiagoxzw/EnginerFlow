@@ -37,7 +37,7 @@ from engiflow_api.domain.tabular import (
     validate_mapping,
 )
 from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
-from engiflow_api.infrastructure.models import AuditLog, Dataset, DatasetRow
+from engiflow_api.infrastructure.models import AuditLog, Dataset, DatasetVersionRow
 from engiflow_api.infrastructure.readers import (
     ImportLimits,
     detect_kind_file,
@@ -83,7 +83,7 @@ def limits(**overrides: int | float) -> ImportLimits:
 @dataclass
 class Loaded:
     columns: list[str]
-    rows: list[list[str]]
+    rows: list[list[str | None]]
     row_numbers: list[int]
     sheet: str | None
     warnings: list[str]
@@ -198,7 +198,7 @@ def test_read_csv_detects_semicolon_and_cp1252_and_keeps_zeros() -> None:
     table = _load(CSV_CP1252)
     assert table.columns == ["SYN-Código", "SYN-Descrição", "Unidade"]
     assert table.rows[0] == ["00123", "Parafuso M8 sextavado", "UN"]
-    assert table.rows[3][1].startswith("Arruela lisa 8 mm")
+    assert (table.rows[3][1] or "").startswith("Arruela lisa 8 mm")
     assert table.warnings == []
     assert all(any(cell for cell in row) for row in table.rows)  # linha vazia descartada
 
@@ -604,7 +604,7 @@ def test_regression_commit_failure_removes_new_file_and_rows(
     assert _final_files(storage) == []
     assert list(storage.iterdir()) == []
     with session_factory() as db:
-        assert db.scalar(select(func.count()).select_from(DatasetRow)) == 0
+        assert db.scalar(select(func.count()).select_from(DatasetVersionRow)) == 0
 
 
 def test_regression_commit_failure_keeps_file_that_already_existed(

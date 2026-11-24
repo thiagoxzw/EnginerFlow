@@ -25,7 +25,7 @@ from engiflow_api.domain.tabular import (
     spec_signature,
     unique_headers,
 )
-from engiflow_api.infrastructure.models import Dataset, DatasetRow
+from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
 from engiflow_api.infrastructure.readers import ImportLimits
 
 SYN_CSV = "SYN-Código;SYN-Descrição\n00123;SYN parafuso m8\n0123;SYN parafuso m8\n".encode()
@@ -196,7 +196,7 @@ def test_concurrent_imports_of_same_file_create_exactly_one_dataset(
 
     with session_factory() as db:
         datasets = db.scalar(select(func.count()).select_from(Dataset))
-        rows = db.scalar(select(func.count()).select_from(DatasetRow))
+        rows = db.scalar(select(func.count()).select_from(DatasetVersionRow))
     finals = [p for p in storage.iterdir() if not p.name.startswith(".tmp-")]
     temps = [p for p in storage.iterdir() if p.name.startswith(".tmp-")]
     assert errors == [], f"erros inesperados: {errors!r}"
@@ -289,7 +289,9 @@ def test_original_file_and_rows_survive_restart(
         dataset = db.scalar(select(Dataset).where(Dataset.source_sha256 == digest))
         assert dataset is not None and dataset.row_count == 2
         stored_rows = db.scalar(
-            select(func.count()).select_from(DatasetRow).where(DatasetRow.dataset_id == dataset.id)
+            select(func.count())
+            .select_from(DatasetVersionRow)
+            .where(DatasetVersionRow.version_id == dataset.current_version_id)
         )
         assert stored_rows == 2
     stored = storage / f"{digest}.csv"

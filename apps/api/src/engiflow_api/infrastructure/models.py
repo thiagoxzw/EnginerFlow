@@ -2,8 +2,19 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -78,20 +89,112 @@ class Dataset(Base):
     row_count: Mapped[int] = mapped_column(Integer, nullable=False)
     mapping: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     warnings: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Ponteiro para a versão atual (2B.1). Campos columns/mapping/row_count espelham a versão atual.
+    current_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("dataset_versions.id", use_alter=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
-class DatasetRow(Base):
-    """Linha de uma tabela importada. Valores são sempre texto."""
+class DatasetVersion(Base):
+    """Versão materializada de uma tabela. Versão 1 = importação original. Imutável após criada."""
 
-    __tablename__ = "dataset_rows"
-    __table_args__ = (Index("ix_dataset_rows_dataset_row", "dataset_id", "row_number"),)
+    __tablename__ = "dataset_versions"
+    __table_args__ = (UniqueConstraint("dataset_id", "number", name="uq_dataset_versions_number"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     dataset_id: Mapped[str] = mapped_column(
         ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
     )
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DatasetVersionRow(Base):
+    """Linha de uma versão. Valores: string (texto), None (desconhecido); vazio é ""."""
+
+    __tablename__ = "dataset_version_rows"
+    __table_args__ = (Index("ix_dataset_version_rows_version_row", "version_id", "row_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version_id: Mapped[str] = mapped_column(
+        ForeignKey("dataset_versions.id", ondelete="CASCADE"), nullable=False
+    )
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    values: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    values: Mapped[list[str | None]] = mapped_column(JSON, nullable=False)
+
+
+class DatasetMetadataVersion(Base):
+    """Colunas e mapeamento de uma versão (metadados versionados)."""
+
+    __tablename__ = "dataset_metadata_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    version_id: Mapped[str] = mapped_column(
+        ForeignKey("dataset_versions.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    columns: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    mapping: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class DatasetOperation(Base):
+    """Histórico de operações. Nunca apagado: desfazer muda o status para 'undone'."""
+
+    __tablename__ = "dataset_operations"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "seq", name="uq_dataset_operations_seq"),
+        UniqueConstraint("dataset_id", "idempotency_key", name="uq_dataset_operations_idem"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    dataset_id: Mapped[str] = mapped_column(
+        ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    code_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    params_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    before_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    after_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    rows_affected: Mapped[int] = mapped_column(Integer, nullable=False)
+    cells_changed: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DatasetPreview(Base):
+    """Prévia de operação. Consumida uma única vez e com validade."""
+
+    __tablename__ = "dataset_previews"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    dataset_id: Mapped[str] = mapped_column(
+        ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
+    )
+    base_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    code_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    params_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    after_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    rows_affected: Mapped[int] = mapped_column(Integer, nullable=False)
+    cells_changed: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
