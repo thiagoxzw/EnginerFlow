@@ -662,6 +662,18 @@ def test_migration_0003_preserves_existing_rows_and_hash(
                 .order_by(new_version_rows.c.row_number)
             ).all()
         assert version_id == dataset_id
+        # Regressão: ids gerados pela migração cabem na coluna String(36) (PostgreSQL rejeita mais).
+        with engine.connect() as conn:
+            meta_ids = (
+                conn.execute(
+                    sa.select(sa.column("id", sa.String)).select_from(
+                        sa.table("dataset_metadata_versions", sa.column("id", sa.String))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert meta_ids and all(len(i) <= 36 for i in meta_ids)
         assert stored_sha == content_sha256(columns, rows)
         assert [(n, v) for n, v in migrated] == [(i + 2, r) for i, r in enumerate(rows)]
         engine.dispose()

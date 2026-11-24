@@ -11,6 +11,7 @@ Revises: 0002_data_studio
 Create Date: 2026-11-24
 """
 
+import uuid
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -210,7 +211,7 @@ def _migrate_existing_datasets() -> None:
             )
         bind.execute(
             metadata.insert().values(
-                id=f"meta-{dataset_id}",
+                id=str(uuid.uuid4()),
                 version_id=dataset_id,
                 columns=list(columns),
                 mapping=dict(mapping or {}),
