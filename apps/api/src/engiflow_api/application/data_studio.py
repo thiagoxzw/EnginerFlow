@@ -23,7 +23,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.application.audit import record_event
-from engiflow_api.domain.canonical import CanonicalHasher
+from engiflow_api.application.versioning import (
+    apply_preview,
+    create_preview,
+    current_state,
+)
+from engiflow_api.domain.canonical import RowsHasher, metadata_sha256
 from engiflow_api.domain.errors import DomainError
 from engiflow_api.domain.tabular import (
     CANONICAL_FIELDS,
@@ -134,7 +139,7 @@ def import_upload(
             )
             db.add(version)
             db.flush()
-            hasher = CanonicalHasher(stream.columns)
+            hasher = RowsHasher()
             batch: list[dict[str, Any]] = []
             count = 0
             for number, values in stream.rows:
@@ -148,15 +153,22 @@ def import_upload(
                 db.execute(insert(DatasetVersionRow), batch)
             version.row_count = count
             version.content_sha256 = hasher.hexdigest()
-            db.add(
-                DatasetMetadataVersion(
-                    id=str(uuid.uuid4()),
-                    version_id=version.id,
-                    columns=list(stream.columns),
-                    mapping={},
-                )
+            metadata = DatasetMetadataVersion(
+                id=str(uuid.uuid4()),
+                dataset_id=dataset.id,
+                version_id=version.id,
+                number=1,
+                parent_metadata_version_id=None,
+                columns=list(stream.columns),
+                mapping={},
+                header_row=None,
+                metadata_sha256=metadata_sha256(list(stream.columns), {}, None),
+                actor=actor,
             )
+            db.add(metadata)
+            db.flush()
             dataset.current_version_id = version.id
+            dataset.current_metadata_version_id = metadata.id
             dataset.row_count = count
             dataset.warnings = list(stream.warnings)
 
@@ -213,17 +225,28 @@ def set_mapping(
     actor: str,
     correlation_id: str | None,
 ) -> Dataset:
+    """Mapeamento é uma operação de metadados: gera nova versão de metadados e histórico."""
     clean = validate_mapping(mapping, dataset.columns)
-    previous = dict(dataset.mapping)
-    dataset.mapping = clean
-    record_event(
+    state = current_state(db, dataset)
+    preview = create_preview(
         db,
+        dataset,
+        code="set_mapping",
+        raw_params={"mapping": clean},
+        base_version_id=state.data_version_id,
+        base_metadata_version_id=state.metadata_version_id,
         actor=actor,
-        action="data_studio.mapping",
-        resource=f"dataset:{dataset.id}",
-        result="ok",
         correlation_id=correlation_id,
-        details={"antes": previous, "depois": clean},
+    )
+    apply_preview(
+        db,
+        dataset,
+        preview_id=preview.id,
+        base_version_id=state.data_version_id,
+        base_metadata_version_id=state.metadata_version_id,
+        idempotency_key=None,
+        actor=actor,
+        correlation_id=correlation_id,
     )
     return dataset
 

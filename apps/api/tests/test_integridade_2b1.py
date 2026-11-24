@@ -18,9 +18,8 @@ from sqlalchemy.orm import sessionmaker
 
 from engiflow_api.application import versioning
 from engiflow_api.application.data_studio import get_dataset
-from engiflow_api.application.versioning import load_snapshot
 from engiflow_api.core.config import Settings
-from engiflow_api.domain.canonical import content_sha256
+from engiflow_api.domain.canonical import rows_sha256
 from engiflow_api.domain.errors import ConflictError
 from engiflow_api.infrastructure.models import (
     Dataset,
@@ -246,7 +245,7 @@ def test_failure_mid_transformation_rolls_back_version_operation_and_preview(
     def boom(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("falha simulada após gravar a versão")
 
-    monkeypatch.setattr(versioning, "_move_pointer", boom)
+    monkeypatch.setattr(versioning, "_move_pointers", boom)
     with session_factory() as db:
         dataset = get_dataset(db, ds["id"])
         with pytest.raises(RuntimeError):
@@ -375,8 +374,7 @@ def test_stored_hash_of_every_version_matches_its_rows(
                     .order_by(DatasetVersionRow.row_number)
                 ).all()
             ]
-            snap = load_snapshot(db, version.id)
-            assert version.content_sha256 == content_sha256(snap.columns, rows)
+            assert version.content_sha256 == rows_sha256(rows)
             assert version.row_count == len(rows)
 
 

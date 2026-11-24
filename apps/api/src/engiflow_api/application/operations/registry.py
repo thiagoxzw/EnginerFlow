@@ -1,11 +1,12 @@
-"""Registro central de capacidades de transformação (2B.1).
+"""Registro central de capacidades de transformação (2B.1 e 2B.2).
 
-Cada capacidade é uma função pura sobre um Snapshot (colunas + linhas). Não acessa banco nem
-arquivo. Persistência, prévia e auditoria ficam na camada de versionamento.
+Cada capacidade é uma função pura sobre um Snapshot (colunas, linhas, mapeamento, cabeçalho).
+Não acessa banco nem arquivo. Persistência, prévia e auditoria ficam na camada de versionamento.
 
 Regras comuns:
 - Valores: string (texto, zeros preservados), None (desconhecido), "" (vazio). Nunca convertidos.
 - Operação que não encontra alvo falha; nunca altera silenciosamente.
+- `touches_data=False`: operação só de metadados. Não copia linhas; cria só versão de metadados.
 - `code_version` sobe quando o comportamento muda: entra no histórico de cada operação.
 """
 
@@ -19,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from engiflow_api.domain.errors import DomainError
+from engiflow_api.domain.tabular import CANONICAL_FIELDS
 
 MAX_SELECTED_ROWS = 10_000
 
@@ -28,6 +30,8 @@ class Snapshot:
     columns: list[str]
     rows: list[list[str | None]]
     row_numbers: list[int]
+    mapping: dict[str, str] = field(default_factory=dict)
+    header_row: int | None = None
 
 
 @dataclass(frozen=True)
@@ -62,11 +66,29 @@ class SetRowsValueParams(_Strict):
     value: str | None = Field(max_length=1000)
 
 
+class SetMappingParams(_Strict):
+    # campo canônico -> nome da coluna. Campos ausentes ficam sem mapeamento.
+    mapping: dict[str, str] = Field(default_factory=dict)
+
+
 def _column_index(snapshot: Snapshot, name: str) -> int:
     try:
         return snapshot.columns.index(name)
     except ValueError as exc:
         raise DomainError(f"Coluna '{name}' não existe nesta versão.") from exc
+
+
+def _with(snapshot: Snapshot, **changes: Any) -> Snapshot:
+    """Cópia do snapshot com campos alterados (rasa para linhas que não mudaram)."""
+    base: dict[str, Any] = {
+        "columns": list(snapshot.columns),
+        "rows": snapshot.rows,
+        "row_numbers": snapshot.row_numbers,
+        "mapping": dict(snapshot.mapping),
+        "header_row": snapshot.header_row,
+    }
+    base.update(changes)
+    return Snapshot(**base)
 
 
 def _rename_column(snapshot: Snapshot, params: RenameColumnParams) -> OperationResult:
@@ -79,8 +101,12 @@ def _rename_column(snapshot: Snapshot, params: RenameColumnParams) -> OperationR
         raise DomainError(f"Já existe uma coluna chamada '{target}'.")
     columns = list(snapshot.columns)
     columns[index] = target
+    mapping = {
+        field_name: (target if column == params.from_name else column)
+        for field_name, column in snapshot.mapping.items()
+    }
     return OperationResult(
-        snapshot=Snapshot(columns, snapshot.rows, snapshot.row_numbers),
+        snapshot=_with(snapshot, columns=columns, mapping=mapping),
         rows_affected=0,
         cells_changed=0,
     )
@@ -115,7 +141,7 @@ def _replace_text(snapshot: Snapshot, params: ReplaceTextParams) -> OperationRes
         else:
             rows.append(row)
     return OperationResult(
-        snapshot=Snapshot(list(snapshot.columns), rows, snapshot.row_numbers),
+        snapshot=_with(snapshot, rows=rows),
         rows_affected=rows_affected,
         cells_changed=cells_changed,
     )
@@ -141,9 +167,23 @@ def _set_rows_value(snapshot: Snapshot, params: SetRowsValueParams) -> Operation
         else:
             rows.append(row)
     return OperationResult(
-        snapshot=Snapshot(list(snapshot.columns), rows, snapshot.row_numbers),
+        snapshot=_with(snapshot, rows=rows),
         rows_affected=len(present),
         cells_changed=cells_changed,
+    )
+
+
+def _set_mapping(snapshot: Snapshot, params: SetMappingParams) -> OperationResult:
+    unknown_fields = sorted(set(params.mapping) - set(CANONICAL_FIELDS))
+    if unknown_fields:
+        raise DomainError(f"Campos desconhecidos no mapeamento: {', '.join(unknown_fields)}.")
+    missing = sorted({c for c in params.mapping.values() if c not in snapshot.columns})
+    if missing:
+        raise DomainError(f"Colunas inexistentes na tabela: {', '.join(missing)}.")
+    return OperationResult(
+        snapshot=_with(snapshot, mapping=dict(params.mapping)),
+        rows_affected=0,
+        cells_changed=0,
     )
 
 
@@ -154,17 +194,28 @@ class OperationSpec:
     description: str
     params_model: type[BaseModel]
     reversible: bool
+    touches_data: bool
     apply: Callable[[Snapshot, Any], OperationResult]
 
 
 OPERATIONS: dict[str, OperationSpec] = {
     "rename_column": OperationSpec(
         code="rename_column",
-        version=1,
-        description="Renomeia uma coluna. Não altera valores.",
+        version=2,
+        description="Renomeia uma coluna e atualiza o mapeamento. Só metadados: não copia linhas.",
         params_model=RenameColumnParams,
         reversible=True,
+        touches_data=False,
         apply=_rename_column,
+    ),
+    "set_mapping": OperationSpec(
+        code="set_mapping",
+        version=1,
+        description="Define o mapeamento de campos canônicos para colunas. Só metadados.",
+        params_model=SetMappingParams,
+        reversible=True,
+        touches_data=False,
+        apply=_set_mapping,
     ),
     "replace_text": OperationSpec(
         code="replace_text",
@@ -172,16 +223,17 @@ OPERATIONS: dict[str, OperationSpec] = {
         description="Substitui texto em uma coluna. Desconhecidos não são alterados.",
         params_model=ReplaceTextParams,
         reversible=True,
+        touches_data=True,
         apply=_replace_text,
     ),
     "set_rows_value": OperationSpec(
         code="set_rows_value",
         version=1,
-        description=(
-            "Define o valor de uma coluna nas linhas selecionadas (texto, vazio ou desconhecido)."
-        ),
+        description="Define o valor de uma coluna nas linhas selecionadas "
+        "(texto, vazio ou desconhecido).",
         params_model=SetRowsValueParams,
         reversible=True,
+        touches_data=True,
         apply=_set_rows_value,
     ),
 }

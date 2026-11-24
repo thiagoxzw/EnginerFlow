@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from engiflow_api.application import versioning
 from engiflow_api.application.data_studio import get_dataset
 from engiflow_api.application.operations.registry import OPERATIONS
-from engiflow_api.infrastructure.models import DatasetOperation, DatasetPreview, DatasetVersion
+from engiflow_api.infrastructure.models import DatasetOperation, DatasetPreview
 from engiflow_api.presentation.deps import CurrentUser, DbDep
 
 router = APIRouter(prefix="/api/v1", tags=["transformacoes"])
@@ -43,6 +43,7 @@ class PreviewIn(BaseModel):
     code: str = Field(min_length=1, max_length=64)
     params: dict[str, Any] = Field(default_factory=dict)
     base_version_id: str
+    base_metadata_version_id: str | None = None
 
 
 class PreviewOut(BaseModel):
@@ -57,6 +58,7 @@ class PreviewOut(BaseModel):
 class ApplyIn(BaseModel):
     preview_id: str
     base_version_id: str
+    base_metadata_version_id: str | None = None
 
 
 class OperationOut(BaseModel):
@@ -75,16 +77,19 @@ class OperationOut(BaseModel):
 class ApplyOut(BaseModel):
     created: bool
     current_version_id: str
+    current_metadata_version_id: str
     content_sha256: str
     operation: OperationOut
 
 
 class VersionMoveIn(BaseModel):
     base_version_id: str
+    base_metadata_version_id: str | None = None
 
 
 class VersionMoveOut(BaseModel):
     current_version_id: str
+    current_metadata_version_id: str
 
 
 def _operation_out(op: DatasetOperation) -> OperationOut:
@@ -121,6 +126,43 @@ def catalog(user: CurrentUser) -> list[CatalogItem]:
     ]
 
 
+class MetadataVersionOut(BaseModel):
+    id: str
+    version_id: str
+    number: int
+    parent_metadata_version_id: str | None
+    columns: list[str]
+    mapping: dict[str, str]
+    header_row: int | None
+    metadata_sha256: str
+    template_id: str | None
+    actor: str
+    created_at: datetime
+    is_current: bool
+
+
+@router.get("/datasets/{dataset_id}/metadata-versions", response_model=list[MetadataVersionOut])
+def metadata_versions(dataset_id: str, user: CurrentUser, db: DbDep) -> list[MetadataVersionOut]:
+    dataset = get_dataset(db, dataset_id)
+    return [
+        MetadataVersionOut(
+            id=m.id,
+            version_id=m.version_id,
+            number=m.number,
+            parent_metadata_version_id=m.parent_metadata_version_id,
+            columns=list(m.columns),
+            mapping=dict(m.mapping or {}),
+            header_row=m.header_row,
+            metadata_sha256=m.metadata_sha256,
+            template_id=m.template_id,
+            actor=m.actor,
+            created_at=m.created_at,
+            is_current=m.id == dataset.current_metadata_version_id,
+        )
+        for m in versioning.list_metadata_versions(db, dataset.id)
+    ]
+
+
 @router.get("/datasets/{dataset_id}/versions", response_model=list[VersionOut])
 def versions(dataset_id: str, user: CurrentUser, db: DbDep) -> list[VersionOut]:
     dataset = get_dataset(db, dataset_id)
@@ -149,6 +191,7 @@ def preview(
         code=payload.code,
         raw_params=payload.params,
         base_version_id=payload.base_version_id,
+        base_metadata_version_id=payload.base_metadata_version_id,
         actor=user.email,
         correlation_id=_correlation(request),
     )
@@ -180,6 +223,7 @@ def apply(
         dataset,
         preview_id=payload.preview_id,
         base_version_id=payload.base_version_id,
+        base_metadata_version_id=payload.base_metadata_version_id,
         idempotency_key=idempotency_key,
         actor=user.email,
         correlation_id=_correlation(request),
@@ -190,6 +234,7 @@ def apply(
     return ApplyOut(
         created=outcome.created,
         current_version_id=dataset.current_version_id or "",
+        current_metadata_version_id=dataset.current_metadata_version_id or "",
         content_sha256=outcome.version.content_sha256,
         operation=_operation_out(outcome.operation),
     )
@@ -206,15 +251,19 @@ def undo(
     dataset_id: str, payload: VersionMoveIn, request: Request, user: CurrentUser, db: DbDep
 ) -> VersionMoveOut:
     dataset = get_dataset(db, dataset_id)
-    target: DatasetVersion = versioning.undo(
+    target = versioning.undo(
         db,
         dataset,
         base_version_id=payload.base_version_id,
+        base_metadata_version_id=payload.base_metadata_version_id,
         actor=user.email,
         correlation_id=_correlation(request),
     )
     db.commit()
-    return VersionMoveOut(current_version_id=target.id)
+    return VersionMoveOut(
+        current_version_id=target.data_version_id,
+        current_metadata_version_id=target.metadata_version_id,
+    )
 
 
 @router.post("/datasets/{dataset_id}/redo", response_model=VersionMoveOut)
@@ -222,12 +271,16 @@ def redo(
     dataset_id: str, payload: VersionMoveIn, request: Request, user: CurrentUser, db: DbDep
 ) -> VersionMoveOut:
     dataset = get_dataset(db, dataset_id)
-    target: DatasetVersion = versioning.redo(
+    target = versioning.redo(
         db,
         dataset,
         base_version_id=payload.base_version_id,
+        base_metadata_version_id=payload.base_metadata_version_id,
         actor=user.email,
         correlation_id=_correlation(request),
     )
     db.commit()
-    return VersionMoveOut(current_version_id=target.id)
+    return VersionMoveOut(
+        current_version_id=target.data_version_id,
+        current_metadata_version_id=target.metadata_version_id,
+    )
