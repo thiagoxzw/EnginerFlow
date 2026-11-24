@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from engiflow_api.domain.errors import DomainError
 from engiflow_api.presentation.deps import NotAuthenticated
 
 PROBLEM_JSON = "application/problem+json"
@@ -36,6 +37,10 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(NotAuthenticated)
     async def not_authenticated(request: Request, exc: NotAuthenticated) -> JSONResponse:
         return problem(request, 401, "Não autenticado", "Faça login para continuar.")
+
+    @app.exception_handler(DomainError)
+    async def domain_error(request: Request, exc: DomainError) -> JSONResponse:
+        return problem(request, 422, "Regra de negócio", str(exc))
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
