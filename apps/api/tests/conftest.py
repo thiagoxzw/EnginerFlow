@@ -76,3 +76,16 @@ def logged_client(client: TestClient, user: None) -> TestClient:
     resp = client.post("/api/v1/auth/login", json={"email": EMAIL, "password": PASSWORD})
     assert resp.status_code == 200, resp.text
     return client
+
+
+@pytest.fixture
+def storage_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """Configuração com pasta de armazenamento temporária para testes de upload e operações."""
+    settings = Settings(
+        database_url="sqlite:///unused",
+        data_dir=str(tmp_path / "data"),
+        max_upload_mb=5,
+        max_rows=500_000,
+    )
+    monkeypatch.setattr("engiflow_api.presentation.routes.datasets.get_settings", lambda: settings)
+    return settings

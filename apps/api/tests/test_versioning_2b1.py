@@ -175,21 +175,6 @@ def test_set_rows_value_refuses_missing_rows_and_touches_only_selection() -> Non
 # ---------- API: fluxo completo ----------
 
 
-@pytest.fixture
-def storage_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    settings = Settings(
-        database_url="sqlite:///unused",
-        data_dir=str(tmp_path / "data"),
-        max_upload_mb=5,
-        max_rows=500_000,
-    )
-    monkeypatch.setattr("engiflow_api.presentation.routes.datasets.get_settings", lambda: settings)
-    monkeypatch.setattr(
-        "engiflow_api.presentation.routes.operations.get_settings", lambda: settings, raising=False
-    )
-    return settings
-
-
 def _import(client: TestClient, data: bytes = SYN_CSV) -> dict[str, Any]:
     resp = client.post("/api/v1/datasets", files={"file": ("SYN-v.csv", data, "text/csv")})
     assert resp.status_code == 201, resp.text

@@ -62,3 +62,44 @@ Dados: **somente sintéticos** (prefixo `SYN-`).
 4. **Operação carrega a tabela inteira na memória** para calcular a prévia e a aplicação. Não há medição de desempenho nesta entrega.
 5. **Sem seleção manual de cabeçalho** (prevista para 2B.2).
 6. **Mapeamento não versionado** (decisão acima).
+
+## Homologação (revisão de integridade e CI)
+
+### CI do commit `3e86aa0` (execução 45480885868) — concluído com sucesso
+
+| Job | Resultado |
+|---|---|
+| API (Python) | **sucesso**: lint, formatação, mypy strict, migrações (upgrade, downgrade, upgrade), testes |
+| Web (TypeScript) | **sucesso**: install com lockfile, typecheck, lint, teste (11), build |
+
+- **116 testes aprovados** no PostgreSQL 17 (serviço `postgres:17-alpine` do CI, `ENGIFLOW_TEST_DATABASE_URL` definida). Inclui a migração 0003 nos três sentidos, a concorrência de aplicações simultâneas e a migração de dados da 2A.
+- Nenhuma anotação nas execuções (sem avisos de depreciação de Actions).
+- Execução anterior (`1d42470`, run 45480455872): falhou em PostgreSQL por um defeito real, corrigido em `3e86aa0` (ver CHANGELOG).
+
+### Revisão de integridade (commit seguinte a `3e86aa0`)
+
+| # | Cenário | Cobertura | Teste |
+|---|---|---|---|
+| 1 | Duas operações simultâneas na mesma versão | existente (PG no CI) | `test_concurrent_applications_on_same_base_create_one_version` |
+| 2 | Mesma `Idempotency-Key` com parâmetros diferentes | **adicionado** | `test_same_idempotency_key_with_different_params_is_conflict` |
+| 3 | Aplicação de prévia expirada | existente | `test_unknown_rows_and_expired_preview_are_refused` |
+| 4 | Reutilização de prévia consumida | existente | `test_preview_is_single_use_and_apply_requires_same_base` |
+| 5 | Prévia após undo e redo | **adicionado** (dois casos) | `test_preview_from_undone_state_is_refused_after_redo_changes_base`, `test_preview_generated_in_restored_state_is_refused_after_redo_and_hash_is_deterministic` |
+| 6 | Nova operação após múltiplos undos | **adicionado** | `test_new_operation_after_multiple_undos_discards_the_redo_branch` |
+| 7 | Mapeamentos em renomeações sucessivas | **adicionado** | `test_mapping_survives_successive_renames_and_undo_steps_back` |
+| 8 | Rollback completo em falha durante a transformação | **adicionado** | `test_failure_mid_transformation_rolls_back_version_operation_and_preview` |
+| 9 | Zeros à esquerda, vazio, desconhecido e zero | existente (unidade) + **adicionado** (fluxo com operações) | `test_empty_unknown_zero_and_leading_zeros_survive_operations` |
+| 10 | Imutabilidade das versões anteriores | **adicionado** | `test_previous_versions_are_not_modified_by_later_operations` |
+| 11 | Integridade do hash canônico | existente (vetor fixo) + **adicionado** (hash armazenado de cada versão recalculado a partir das linhas) | `test_stored_hash_of_every_version_matches_its_rows` |
+| 12 | Colisão de nomes durante renomeação | existente | `test_rename_refuses_collision_ignoring_case_and_keeps_rows` |
+
+- Nove testes novos em `tests/test_integridade_2b1.py`. Nenhum teste existente foi duplicado.
+- **Defeitos de produto encontrados nesta revisão: nenhum.** Os erros que apareceram ao escrever os testes foram do próprio teste (base de prévia incorreta, fixture duplicada, patch de módulo inexistente) e foram corrigidos.
+- Total local: **125 testes da API** (SQLite) e 11 do web. Lint, formatação, mypy strict, typecheck, lint e build sem erros.
+
+### Limitações que permanecem
+1. Sem interface de transformação (2B.2 entrega a interface).
+2. Operações mínimas (três).
+3. Sem retenção de versões.
+4. Operações carregam a tabela inteira na memória. Sem medição de desempenho nesta entrega.
+5. Mapeamento não versionado nesta entrega (a 2B.2 versiona mapeamentos e metadados).

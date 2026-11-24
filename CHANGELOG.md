@@ -5,6 +5,8 @@ Formato: Keep a Changelog. Versionamento: Semantic Versioning (ainda sem versão
 ## [Unreleased]
 
 ### Adicionado (Fase 2B.1 — Fundação das transformações)
+- Revisão de integridade: 9 testes cobrindo idempotência com parâmetros diferentes, prévias após undo/redo, nova operação após múltiplos undos, mapeamentos em renomeações, rollback completo, zeros e vazios através das operações, imutabilidade de versões e hash armazenado.
+- Planejamento detalhado da 2B.2 (`docs/roadmap/FASE_2B2_PLANO.md`).
 - Versionamento de tabelas com histórico imutável, prévia com validade e uso único, aplicação com guarda de versão base, idempotência, desfazer e refazer.
 - Capacidades reutilizáveis registradas: `rename_column`, `replace_text`, `set_rows_value`.
 - Hash canônico do conteúdo lógico; distinção entre vazio, desconhecido e zero.
@@ -13,6 +15,12 @@ Formato: Keep a Changelog. Versionamento: Semantic Versioning (ainda sem versão
 ### Adicionado
 - Fase 0: documentação de visão, PRD, arquitetura e decisões (ADR-0001 a ADR-0012), revisadas para uso individual.
 - Fase 1 (em verificação): backend FastAPI com health e readiness; login de usuário único com sessão em cookie HttpOnly; logout; auditoria de login e logout; dashboard com dados reais; erros em Problem Details; correlação de requisições; migração inicial; frontend Next.js com login e dashboard; `docker-compose.yml` com PostgreSQL; CI no GitHub Actions.
+
+### Corrigido (Fase 2B.1 — homologação)
+- Migração 0003: id de metadados passa a ser UUID (cabia em 41 caracteres numa coluna de 36; o PostgreSQL rejeitou).
+- Desfazer uma renomeação restaura o nome no mapeamento atual (antes restaurava o mapeamento da versão 1).
+- Aplicação de operação responde 201 na criação.
+- Célula ausente em linha curta vira desconhecido (`null`), não vazio.
 
 ### Corrigido (verificação adicional da Fase 2A)
 - Cabeçalhos gerados nunca colidem com nomes existentes; comparação sem diferença de caixa.

@@ -44,6 +44,8 @@ Datas: **não definidas**. Dependem de decisões em `decisions/OPEN_QUESTIONS.md
 | 0 — Discovery e arquitetura | Concluída (documentação, ADRs 0001–0012 revisadas) | `docs/decisions/REVISAO_FASE_0.md` |
 | 1 — Foundation | Concluída, com PostgreSQL 17 validado pelo CI | `docs/operations/FASE_1_STATUS.md` |
 | 2A — Data Studio | **Concluída** (merge do PR #1 por squash, CI da `main` verde) | `docs/operations/FASE_2_STATUS.md` |
-| 2B.1 — Fundação das transformações | Em andamento na branch `feat/fase-2b-1-transformations`; PostgreSQL pendente do CI | `docs/operations/FASE_2B1_STATUS.md` |
-| 2B.2 a 2B.4 — manipulação, cruzamento, interface e cálculo | Planejadas; **não iniciadas** (aguardam 2B.1 aprovada) | `docs/roadmap/FASE_2B_PLANO.md` |
+| 2B.1 — Fundação das transformações | Em homologação no PR #2 (CI verde em PostgreSQL 17, 116 testes); integridade revisada (9 testes novos) | `docs/operations/FASE_2B1_STATUS.md` |
+| 2B.2 — Manipulação de dados e interface funcional | Planejada em `docs/roadmap/FASE_2B2_PLANO.md`; **não iniciada** (aguarda merge da 2B.1) | `docs/roadmap/FASE_2B2_PLANO.md` |
+| 2B.3 — Cruzamento de informações | Planejada em `docs/roadmap/FASE_2B_PLANO.md` | — |
+| 2B.4 — Refinamentos (virtualização, cálculos, medições) | Planejada em `docs/roadmap/FASE_2B_PLANO.md` | — |
 | 3 — BOM Manager | Não iniciada (não autorizada) | — |
