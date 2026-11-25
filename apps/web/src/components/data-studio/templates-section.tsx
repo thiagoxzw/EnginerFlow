@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { CANONICAL_FIELDS, FIELD_LABELS, type CanonicalField } from "@/lib/datasets";
+import { invalidateDataset } from "@/lib/invalidate";
 import {
   applyPreview,
   createTemplate,
@@ -123,7 +124,7 @@ export function TemplatesSection({
       setPreview(null);
       setPreviewState(null);
       setConfirmPartial(false);
-      await queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] });
+      await invalidateDataset(queryClient, datasetId);
       setMessage("Modelo aplicado. O histórico anterior foi preservado.");
       onApplied();
     } catch (error) {

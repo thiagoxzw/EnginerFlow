@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { errorText } from "@/components/data-studio/templates-section";
+import { invalidateDataset } from "@/lib/invalidate";
 import { applyOperation, previewOperation, type OperationPreview } from "@/lib/operations";
 import { OP_LABELS, VALUE_OPS, type FilterOp } from "@/lib/rows";
 import { getDatasetState } from "@/lib/templates";
@@ -98,7 +99,7 @@ export function ReplaceSection({ datasetId, columns }: { datasetId: string; colu
     try {
       await applyOperation(datasetId, preview.result.preview_id, preview.state);
       setPreview(null);
-      await queryClient.invalidateQueries({ queryKey: ["rows", datasetId] });
+      await invalidateDataset(queryClient, datasetId);
       setMessage("Substituição aplicada. A versão anterior continua no histórico.");
     } catch (error) {
       setPreview(null);

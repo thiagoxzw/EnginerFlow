@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { errorText } from "@/components/data-studio/templates-section";
 import { ApiError } from "@/lib/api";
+import { invalidateDataset } from "@/lib/invalidate";
 import { listOperations, listVersions, moveHistory } from "@/lib/operations";
 import { getDatasetState } from "@/lib/templates";
 
@@ -55,11 +56,7 @@ export function HistoryPanel({ datasetId }: { datasetId: string }) {
   const undone = operations.data?.filter((o) => o.status === "undone") ?? [];
 
   async function refreshAll() {
-    await Promise.all(
-      ["rows", "dataset", "operations", "versions", "metadata-versions", "raw-head"].map((key) =>
-        queryClient.invalidateQueries({ queryKey: [key, datasetId] }),
-      ),
-    );
+    await invalidateDataset(queryClient, datasetId);
   }
 
   async function move(direction: "undo" | "redo") {

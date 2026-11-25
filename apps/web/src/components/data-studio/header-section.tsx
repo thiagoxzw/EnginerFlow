@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { errorText } from "@/components/data-studio/templates-section";
+import { invalidateDataset } from "@/lib/invalidate";
 import {
   applyOperation,
   metadataVersions,
@@ -60,9 +61,7 @@ export function HeaderSection({ datasetId }: { datasetId: string }) {
     try {
       await applyOperation(datasetId, preview.result.preview_id, preview.state);
       setPreview(null);
-      await queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] });
-      await queryClient.invalidateQueries({ queryKey: ["metadata-versions", datasetId] });
-      await queryClient.invalidateQueries({ queryKey: ["raw-head", datasetId] });
+      await invalidateDataset(queryClient, datasetId);
       setMessage(`Cabeçalho definido na linha ${preview.row}. Versões anteriores preservadas.`);
     } catch (error) {
       setPreview(null);

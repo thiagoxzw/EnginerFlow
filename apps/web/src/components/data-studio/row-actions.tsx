@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { errorText } from "@/components/data-studio/templates-section";
+import { invalidateDataset } from "@/lib/invalidate";
 import { applyOperation, previewOperation, type OperationPreview } from "@/lib/operations";
 import { getDatasetState, type DatasetState } from "@/lib/templates";
 
@@ -79,8 +80,7 @@ export function RowActions({
       await applyOperation(datasetId, pending.preview.preview_id, pending.state);
       const done = pending.kind === "delete" ? "Linhas excluídas logicamente." : "Valores atualizados.";
       setPending(null);
-      await queryClient.invalidateQueries({ queryKey: ["rows", datasetId] });
-      await queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] });
+      await invalidateDataset(queryClient, datasetId);
       setMessage(`${done} Desfazer disponível no histórico.`);
       onApplied?.();
     } catch (error) {

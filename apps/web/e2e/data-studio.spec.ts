@@ -35,6 +35,7 @@ test("importa, filtra, substitui em lote com prévia e desfaz pelo histórico", 
 
   // Filtro: quantidade maior que 5 (10 e 7,5; zero não casa)
   await page.getByRole("button", { name: "Adicionar filtro" }).click();
+  await page.getByLabel("Coluna do filtro 1").selectOption("Qtd");
   await page.getByLabel("Operador do filtro 1").selectOption({ label: "maior que" });
   await page.getByLabel("Valor do filtro 1").fill("5");
   await expect(page.getByText(/Linhas 1–2 de 2/)).toBeVisible();
@@ -53,5 +54,6 @@ test("importa, filtra, substitui em lote com prévia e desfaz pelo histórico", 
   // Histórico: desfazer restaura o valor original
   await page.getByRole("button", { name: "Desfazer (Ctrl+Z)" }).click();
   await expect(page.getByText("Operação desfeita.")).toBeVisible();
-  await expect(page.getByRole("cell", { name: "Parafuso", exact: true })).toBeVisible();
+  await expect(page.getByText("Parafuso", { exact: true })).toBeVisible();
+  await expect(page.getByText("Parafuso X")).toHaveCount(0);
 });

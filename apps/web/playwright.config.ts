@@ -12,5 +12,16 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      // E2E_CHROME_PATH só é definido em execução local (navegador já instalado). No CI fica vazio.
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(process.env.E2E_CHROME_PATH
+          ? { launchOptions: { executablePath: process.env.E2E_CHROME_PATH } }
+          : {}),
+      },
+    },
+  ],
 });
