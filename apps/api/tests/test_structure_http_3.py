@@ -121,3 +121,29 @@ def test_duplicate_rows_increases_count_and_undo_restores(
     assert rows[0] == rows[1]
     _undo(logged_client, ds["id"])
     assert _table(logged_client, ds["id"]) == before
+
+
+def test_structural_change_does_not_alter_derived_table_or_its_lineage(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    """Renumerar linhas da origem não muda a tabela derivada (versão congelada) nem a rastreabilidade."""
+    source = _import(logged_client)
+    derived = logged_client.post(
+        "/api/v1/crossing/formula/derive",
+        json={"dataset_id": source["id"], "formula": "[Qtd]", "new_column": "Qtd copiada"},
+    )
+    assert derived.status_code == 201, derived.text
+    derived_id = derived.json()["dataset_id"]
+    derived_before = _table(logged_client, derived_id)
+    lineage_before = logged_client.get(f"/api/v1/datasets/{derived_id}/lineage").json()
+
+    _run(logged_client, source["id"], "insert_rows", {"after_row_number": 2, "count": 3})
+    _run(logged_client, source["id"], "duplicate_rows", {"row_numbers": [3]})
+
+    # A derivada não muda: continua com as linhas congeladas no momento da criação.
+    assert _table(logged_client, derived_id) == derived_before
+    # A rastreabilidade continua apontando para a mesma origem e versão.
+    lineage_after = logged_client.get(f"/api/v1/datasets/{derived_id}/lineage").json()
+    assert lineage_after == lineage_before
+    # A origem, por outro lado, tem as linhas novas.
+    assert len(_table(logged_client, source["id"])[1]) == len(derived_before[1]) + 4

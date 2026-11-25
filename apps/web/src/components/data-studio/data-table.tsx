@@ -36,6 +36,7 @@ import {
   type PastePlan,
 } from "@/lib/clipboard";
 import { bulkValueCells, fillDownCells, rangeValues } from "@/lib/range";
+import { listVersions } from "@/lib/operations";
 import { invalidateDataset } from "@/lib/invalidate";
 import { clearRangeCells, extendRange, pageRange, rangeContains, type CellRange } from "@/lib/range";
 import {
@@ -92,6 +93,15 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   // Colagem: mensagens de validação e confirmação para colagens grandes.
   const queryClient = useQueryClient();
+  // Versão atual da tabela: muda a cada operação, prévia aplicada ou desfazer/refazer.
+  const versionsQuery = useQuery({
+    queryKey: ["versions", datasetId],
+    queryFn: () => listVersions(datasetId),
+  });
+  const versionId = versionsQuery.data?.find((v) => v.is_current)?.id ?? null;
+  // Seleção, intervalo e confirmações pendentes referem-se a números de linha de UMA versão.
+  // Ao trocar de versão (renumeração, desfazer, colagem), eles são descartados antes de qualquer uso.
+  const [seenVersion, setSeenVersion] = useState<string | null>(versionId);
   const [pasteMessage, setPasteMessage] = useState<string | null>(null);
   const [pendingPaste, setPendingPaste] = useState<(PastePlan & { ok: true }) | null>(null);
   const [pasting, setPasting] = useState(false);
@@ -262,6 +272,17 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
       return;
     }
     void applyPaste(plan.cells);
+  }
+
+  // Descarta o estado ligado à versão anterior (ajuste de estado durante a renderização, sem efeito).
+  if (seenVersion !== versionId) {
+    setSeenVersion(versionId);
+    setSelected(new Set());
+    setScope("manual");
+    setSelection(null);
+    setPendingClear(null);
+    setPendingAction(null);
+    setMenu(null);
   }
 
   function pointer(rowIndex: number, colIndex: number, shift: boolean) {

@@ -8,16 +8,78 @@
 
 export const MAX_PASTE_CELLS = 5000;
 
-/** Converte texto da área de transferência em matriz de células. */
+/**
+ * Converte texto da área de transferência em matriz de células, como o Excel faz:
+ * - Campo entre aspas pode conter tabulação, quebra de linha e aspas (escritas como "").
+ * - Fora de aspas, tabulação separa células e CRLF ou LF separam linhas.
+ * - A última linha vazia (quebra final) é descartada.
+ */
 export function parseTsv(text: string): string[][] {
-  const lines = text.split(/\r?\n/);
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  return lines.map((line) => line.split("\t"));
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  let i = 0;
+  let atFieldStart = true;
+  while (i < text.length) {
+    const ch = text[i] as string;
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        quoted = false;
+        i += 1;
+        continue;
+      }
+      field += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' && atFieldStart && field === "") {
+      quoted = true;
+      atFieldStart = false;
+      i += 1;
+      continue;
+    }
+    if (ch === "\t") {
+      row.push(field);
+      field = "";
+      atFieldStart = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "\r" || ch === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      atFieldStart = true;
+      i += ch === "\r" && text[i + 1] === "\n" ? 2 : 1;
+      continue;
+    }
+    field += ch;
+    atFieldStart = false;
+    i += 1;
+  }
+  // Fim do texto: fecha a última célula. Quebra final não gera linha vazia extra.
+  if (field !== "" || row.length > 0 || atFieldStart === false) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
 }
 
-/** Converte uma matriz de texto em TSV, pronto para a área de transferência. */
+/** Célula em formato TSV: entre aspas (com aspas duplicadas) quando contém tabulação, quebra ou aspa. */
+function tsvField(value: string): string {
+  return /["\t\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+/** Converte uma matriz de texto em TSV, pronto para a área de transferência do Excel. */
 export function serializeTsv(rows: string[][]): string {
-  return rows.map((row) => row.join("\t")).join("\n");
+  return rows.map((row) => row.map(tsvField).join("\t")).join("\n");
 }
 
 export interface CellTarget {

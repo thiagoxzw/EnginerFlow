@@ -18,6 +18,37 @@ describe("parseTsv", () => {
   });
 });
 
+describe("TSV compatível com o Excel", () => {
+  it("lê campo entre aspas com tabulação, quebra de linha e aspas escapadas", () => {
+    const text = 'a\t"x\ty"\t"linha 1\r\nlinha 2"\n"diz ""oi"""\tfim\n';
+    expect(parseTsv(text)).toEqual([
+      ["a", "x\ty", "linha 1\r\nlinha 2"],
+      ['diz "oi"', "fim"],
+    ]);
+  });
+
+  it("aspa no meio de um campo sem aspas de abertura é texto comum", () => {
+    expect(parseTsv('ab"c\td')).toEqual([['ab"c', "d"]]);
+  });
+
+  it("ida e volta preserva tabulação, quebra, aspa e vazio", () => {
+    const matrix = [
+      ["com\ttab", 'com "aspas"', "com\nquebra"],
+      ["", "007", "x\r\ny"],
+    ];
+    expect(parseTsv(serializeTsv(matrix))).toEqual(matrix);
+  });
+
+  it("célula sem caracteres especiais continua sem aspas", () => {
+    expect(serializeTsv([["a", "b"]])).toBe("a\tb");
+  });
+
+  it("texto vazio não gera linhas e quebra final não gera linha extra", () => {
+    expect(parseTsv("")).toEqual([]);
+    expect(parseTsv("a\n")).toEqual([["a"]]);
+  });
+});
+
 describe("serializeTsv", () => {
   it("gera TSV que volta igual ao ser lido", () => {
     const matrix = [
