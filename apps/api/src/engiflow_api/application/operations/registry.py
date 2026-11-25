@@ -17,9 +17,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from engiflow_api.domain.errors import DomainError
+from engiflow_api.domain.query import MAX_FILTERS, FilterIn, RowMatcher, TableQuery
 from engiflow_api.domain.tabular import CANONICAL_FIELDS
 
 MAX_SELECTED_ROWS = 10_000
@@ -54,12 +55,29 @@ class RenameColumnParams(_Strict):
     to_name: str = Field(min_length=1, max_length=255)
 
 
+MAX_REPLACE_COLUMNS = 20
+
+
 class ReplaceTextParams(_Strict):
-    column: str = Field(min_length=1, max_length=255)
+    # `column` é o formato da versão 1 (uma coluna). `columns` é o formato em lote.
+    column: str | None = Field(default=None, min_length=1, max_length=255)
+    columns: list[str] = Field(default_factory=list, max_length=MAX_REPLACE_COLUMNS)
     find: str = Field(min_length=1, max_length=1000)
     replace: str = Field(default="", max_length=1000)
     match_case: bool = True
     whole_cell: bool = False
+    # Só linhas que casam com TODOS os filtros são alteradas. Sem filtro: todas as linhas.
+    filters: list[FilterIn] = Field(default_factory=list, max_length=MAX_FILTERS)
+
+    @model_validator(mode="after")
+    def _one_of_column_or_columns(self) -> ReplaceTextParams:
+        if self.column and not self.columns:
+            self.columns = [self.column]
+        if not self.columns:
+            raise ValueError("Informe ao menos uma coluna.")
+        if len(set(self.columns)) != len(self.columns):
+            raise ValueError("Colunas repetidas na substituição.")
+        return self
 
 
 class SetRowsValueParams(_Strict):
@@ -116,30 +134,44 @@ def _rename_column(snapshot: Snapshot, params: RenameColumnParams) -> OperationR
 
 
 def _replace_text(snapshot: Snapshot, params: ReplaceTextParams) -> OperationResult:
-    index = _column_index(snapshot, params.column)
+    """Substitui texto nas colunas indicadas, nas linhas que casam com os filtros.
+
+    Desconhecido (None) nunca é alterado. Vazio e zero são texto comum. Contagens:
+    `rows_affected` = linhas com ao menos uma célula alterada; `cells_changed` = células.
+    """
+    indexes: list[int] = []
+    for name in params.columns:
+        index = _column_index(snapshot, name)
+        indexes.append(index)
+    matcher = RowMatcher(list(snapshot.columns), TableQuery(filters=list(params.filters)))
     flags = 0 if params.match_case else re.IGNORECASE
-    pattern = re.compile(
-        rf"^{re.escape(params.find)}$" if params.whole_cell else re.escape(params.find), flags
-    )
+    pattern = re.compile(re.escape(params.find), flags)
+
+    def replaced_cell(cell: str) -> str:
+        if params.whole_cell:
+            return params.replace if pattern.fullmatch(cell) else cell
+        return pattern.sub(lambda _m: params.replace, cell)
+
     rows: list[list[str | None]] = []
     rows_affected = 0
     cells_changed = 0
     for row in snapshot.rows:
-        cell = row[index]
-        if cell is None:  # desconhecido não é substituído
+        if not matcher.matches(row):
             rows.append(row)
             continue
-        if params.whole_cell:
-            left = cell if params.match_case else cell.casefold()
-            needle = params.find if params.match_case else params.find.casefold()
-            replaced = params.replace if left == needle else cell
-        else:
-            replaced = pattern.sub(lambda _m: params.replace, cell)
-        if replaced != cell:
-            cells_changed += 1
+        new_row: list[str | None] | None = None
+        for index in indexes:
+            cell = row[index]
+            if cell is None:  # desconhecido não é substituído
+                continue
+            value = replaced_cell(cell)
+            if value != cell:
+                if new_row is None:
+                    new_row = list(row)
+                new_row[index] = value
+                cells_changed += 1
+        if new_row is not None:
             rows_affected += 1
-            new_row = list(row)
-            new_row[index] = replaced
             rows.append(new_row)
         else:
             rows.append(row)
@@ -304,8 +336,9 @@ OPERATIONS: dict[str, OperationSpec] = {
     ),
     "replace_text": OperationSpec(
         code="replace_text",
-        version=1,
-        description="Substitui texto em uma coluna. Desconhecidos não são alterados.",
+        version=2,
+        description="Substitui texto em uma ou mais colunas, nas linhas que casam com filtros. "
+        "Desconhecidos não são alterados.",
         params_model=ReplaceTextParams,
         reversible=True,
         touches_data=True,

@@ -7,6 +7,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api";
 import { DataTable } from "@/components/data-studio/data-table";
 import { HeaderSection } from "@/components/data-studio/header-section";
+import { ReplaceSection } from "@/components/data-studio/replace-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
   CANONICAL_FIELDS,
@@ -244,6 +245,8 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
       ) : null}
 
       <DataTable datasetId={datasetId} columns={data.columns} />
+
+      <ReplaceSection datasetId={datasetId} columns={data.columns} />
       <ExportButtons
         label="Exportar tabela"
         onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}
