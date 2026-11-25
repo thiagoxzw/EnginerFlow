@@ -13,7 +13,13 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from engiflow_api.application.crossing import LookupSpec, create_derived_lookup, run_lookup
+from engiflow_api.application.crossing import (
+    LookupSpec,
+    create_derived_join,
+    create_derived_lookup,
+    run_join,
+    run_lookup,
+)
 from engiflow_api.application.data_studio import get_dataset
 from engiflow_api.domain import lookup as lk
 from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
@@ -135,4 +141,80 @@ def lookup_export(
         content=content,
         media_type=_MEDIA[format],
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class JoinIn(BaseModel):
+    left_id: str = Field(min_length=1, max_length=36)
+    right_id: str = Field(min_length=1, max_length=36)
+    left_keys: list[str] = Field(min_length=1, max_length=10)
+    right_keys: list[str] = Field(min_length=1, max_length=10)
+    join_type: Literal["inner", "left", "right", "full"] = "inner"
+
+
+class JoinPreviewOut(BaseModel):
+    columns: list[str]
+    cardinality: str
+    left_rows: int
+    right_rows: int
+    matched_keys: int
+    matched_pairs: int
+    left_only_rows: int
+    right_only_rows: int
+    estimated_rows: int
+    notes: list[str]
+    sample: list[list[str | None]]
+
+
+@router.post("/join/preview", response_model=JoinPreviewOut)
+def join_preview(
+    payload: JoinIn,
+    user: CurrentUser,
+    db: DbDep,
+    sample: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> JoinPreviewOut:
+    """Cardinalidade e linhas estimadas antes da confirmação. Não grava nada."""
+    left = get_dataset(db, payload.left_id)
+    right = get_dataset(db, payload.right_id)
+    outcome = run_join(
+        db, left, right, tuple(payload.left_keys), tuple(payload.right_keys), payload.join_type
+    )
+    plan = outcome.plan
+    return JoinPreviewOut(
+        columns=outcome.columns,
+        cardinality=plan.cardinality,
+        left_rows=plan.left_rows,
+        right_rows=plan.right_rows,
+        matched_keys=plan.matched_keys,
+        matched_pairs=plan.matched_pairs,
+        left_only_rows=plan.left_only_rows,
+        right_only_rows=plan.right_only_rows,
+        estimated_rows=plan.estimated_rows,
+        notes=plan.notes,
+        sample=outcome.rows[:sample],
+    )
+
+
+@router.post("/join/derive", response_model=DerivedOut, status_code=201)
+def join_derive(payload: JoinIn, request: Request, user: CurrentUser, db: DbDep) -> DerivedOut:
+    left = get_dataset(db, payload.left_id)
+    right = get_dataset(db, payload.right_id)
+    outcome = create_derived_join(
+        db,
+        left,
+        right,
+        tuple(payload.left_keys),
+        tuple(payload.right_keys),
+        payload.join_type,
+        actor=user.email,
+        correlation_id=_correlation(request),
+    )
+    db.commit()
+    return DerivedOut(
+        dataset_id=outcome.dataset.id,
+        name=outcome.dataset.name,
+        run_id=outcome.run.id,
+        row_count=outcome.row_count,
+        counts=outcome.counts,
+        result_sha256=outcome.run.result_sha256,
     )

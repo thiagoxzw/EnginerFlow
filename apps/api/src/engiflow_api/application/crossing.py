@@ -17,6 +17,7 @@ from sqlalchemy import insert, select
 from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.application.audit import record_event
+from engiflow_api.domain import join as jn
 from engiflow_api.domain import lookup as lk
 from engiflow_api.domain.canonical import metadata_sha256, rows_sha256
 from engiflow_api.domain.errors import DomainError
@@ -34,6 +35,7 @@ MAX_LEFT_ROWS = 500_000
 STREAM_BATCH = 2_000
 CONFLICT_SUFFIX = " (direita)"
 LOOKUP_OPERATION_VERSION = 1
+JOIN_OPERATION_VERSION = 1
 _INSERT_BATCH = 2_000
 
 
@@ -155,30 +157,26 @@ def _canonical_params(spec: LookupSpec, left_id: str, right_id: str) -> dict[str
     }
 
 
-def create_derived_lookup(
+def store_derived(
     db: DbSession,
     left: Dataset,
     right: Dataset,
-    spec: LookupSpec,
     *,
+    kind: str,
+    operation_version: int,
+    label: str,
+    params: dict[str, Any],
+    counts: dict[str, Any],
+    columns: list[str],
+    rows: list[list[str | None]],
     actor: str,
     correlation_id: str | None,
-    max_output_rows: int | None = None,
 ) -> DerivedOutcome:
-    """Executa o Super-PROCV e grava o resultado como tabela derivada, com rastreabilidade.
-
-    As origens não são alteradas. A execução congela as versões de dados e de metadados usadas.
-    """
-    outcome = run_lookup(db, left, right, spec, max_output_rows=max_output_rows)
-    rows = [list(values) for _, values in outcome.result.rows]
-    columns = outcome.columns
-
-    params = _canonical_params(spec, left.id, right.id)
+    """Grava o resultado como tabela derivada, com execução e origens congeladas."""
     params_json = json.dumps(params, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    counts = {**outcome.result.counts, "lado_consulta_lido": outcome.left_rows_read}
     run = CrossingRun(
-        kind="lookup",
-        operation_version=LOOKUP_OPERATION_VERSION,
+        kind=kind,
+        operation_version=operation_version,
         params=params,
         params_sha256=hashlib.sha256(params_json.encode("utf-8")).hexdigest(),
         policy=dict(params["policy"]),
@@ -206,7 +204,7 @@ def create_derived_lookup(
         )
 
     derived = Dataset(
-        name=f"{left.name} × {right.name} (Super-PROCV)"[:255],
+        name=f"{left.name} × {right.name} ({label})"[:255],
         source_filename="derivada",
         source_sha256=hashlib.sha256(run.id.encode("utf-8")).hexdigest(),
         file_kind="derived",
@@ -264,7 +262,7 @@ def create_derived_lookup(
     record_event(
         db,
         actor=actor,
-        action="crossing.lookup.derive",
+        action="crossing.derive",
         resource=f"dataset:{derived.id}",
         result="ok",
         correlation_id=correlation_id,
@@ -279,3 +277,140 @@ def create_derived_lookup(
     )
     db.flush()
     return DerivedOutcome(dataset=derived, run=run, row_count=len(rows), counts=counts)
+
+
+def create_derived_lookup(
+    db: DbSession,
+    left: Dataset,
+    right: Dataset,
+    spec: LookupSpec,
+    *,
+    actor: str,
+    correlation_id: str | None,
+    max_output_rows: int | None = None,
+) -> DerivedOutcome:
+    """Executa o Super-PROCV e grava o resultado como tabela derivada, com rastreabilidade."""
+    outcome = run_lookup(db, left, right, spec, max_output_rows=max_output_rows)
+    rows = [list(values) for _, values in outcome.result.rows]
+    params = _canonical_params(spec, left.id, right.id)
+    counts = {**outcome.result.counts, "lado_consulta_lido": outcome.left_rows_read}
+    return store_derived(
+        db,
+        left,
+        right,
+        kind="lookup",
+        operation_version=LOOKUP_OPERATION_VERSION,
+        label="Super-PROCV",
+        params=params,
+        counts=counts,
+        columns=outcome.columns,
+        rows=rows,
+        actor=actor,
+        correlation_id=correlation_id,
+    )
+
+
+@dataclass
+class JoinOutcome:
+    columns: list[str]
+    rows: list[list[str | None]]
+    plan: jn.JoinPlan
+
+
+def _join_indexes(
+    left: Dataset, right: Dataset, left_keys: tuple[str, ...], right_keys: tuple[str, ...]
+) -> tuple[list[int], list[int]]:
+    if len(left_keys) != len(right_keys):
+        raise DomainError("As chaves das duas tabelas devem ter o mesmo número de colunas.")
+    return (
+        _indexes(list(left.columns), left_keys, "a tabela da esquerda"),
+        _indexes(list(right.columns), right_keys, "a tabela da direita"),
+    )
+
+
+def run_join(
+    db: DbSession,
+    left: Dataset,
+    right: Dataset,
+    left_keys: tuple[str, ...],
+    right_keys: tuple[str, ...],
+    join_type: jn.JoinType,
+    *,
+    max_rows: int | None = None,
+) -> JoinOutcome:
+    """Calcula cardinalidade e estimativa a partir das contagens; só então materializa."""
+    limit = jn.MAX_JOIN_ROWS if max_rows is None else max_rows
+    left_idx, right_idx = _join_indexes(left, right, left_keys, right_keys)
+
+    def left_stream() -> Any:
+        return ((n, list(v)) for n, v in _stream_current(db, left))
+
+    def right_stream() -> Any:
+        return ((n, list(v)) for n, v in _stream_current(db, right))
+
+    plan = jn.plan_join(
+        jn.count_keys(left_stream(), left_idx),
+        jn.count_keys(right_stream(), right_idx),
+        join_type,
+    )
+    jn.check_plan(plan, max_rows=limit)
+    rows = jn.materialize_join(
+        left_stream(),
+        right_stream(),
+        left_idx,
+        right_idx,
+        len(left.columns),
+        len(right.columns),
+        join_type,
+        plan,
+    )
+    columns = jn.output_columns(list(left.columns), list(right.columns))
+    return JoinOutcome(columns=columns, rows=rows, plan=plan)
+
+
+def create_derived_join(
+    db: DbSession,
+    left: Dataset,
+    right: Dataset,
+    left_keys: tuple[str, ...],
+    right_keys: tuple[str, ...],
+    join_type: jn.JoinType,
+    *,
+    actor: str,
+    correlation_id: str | None,
+    max_rows: int | None = None,
+) -> DerivedOutcome:
+    """Executa a junção e grava a derivada. Mesma rastreabilidade do Super-PROCV."""
+    outcome = run_join(db, left, right, left_keys, right_keys, join_type, max_rows=max_rows)
+    plan = outcome.plan
+    params: dict[str, Any] = {
+        "left_id": left.id,
+        "right_id": right.id,
+        "left_keys": list(left_keys),
+        "right_keys": list(right_keys),
+        "policy": {"join_type": join_type},
+    }
+    counts: dict[str, Any] = {
+        "cardinalidade": plan.cardinality,
+        "linhas_esquerda": plan.left_rows,
+        "linhas_direita": plan.right_rows,
+        "chaves_casadas": plan.matched_keys,
+        "pares_casados": plan.matched_pairs,
+        "so_esquerda": plan.left_only_rows,
+        "so_direita": plan.right_only_rows,
+        "estimado": plan.estimated_rows,
+    }
+    return store_derived(
+        db,
+        left,
+        right,
+        kind="join",
+        operation_version=JOIN_OPERATION_VERSION,
+        label=f"Junção {join_type}",
+        params=params,
+        counts=counts,
+        columns=outcome.columns,
+        rows=outcome.rows,
+        actor=actor,
+        correlation_id=correlation_id,
+    )
