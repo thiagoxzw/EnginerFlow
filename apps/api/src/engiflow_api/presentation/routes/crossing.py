@@ -1,21 +1,33 @@
-"""Rotas de cruzamento entre tabelas (2B.3). A prévia não grava nada."""
+"""Rotas de cruzamento entre tabelas (2B.3).
+
+- `lookup/preview`: prévia, não grava nada.
+- `lookup/derive`: executa e grava uma tabela derivada com rastreabilidade (nova tabela).
+- `lookup/export`: exporta o resultado (CSV ou XLSX) sem gravar nada.
+"""
 
 from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from engiflow_api.application.crossing import LookupSpec, run_lookup
+from engiflow_api.application.crossing import LookupSpec, create_derived_lookup, run_lookup
 from engiflow_api.application.data_studio import get_dataset
 from engiflow_api.domain import lookup as lk
+from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
 from engiflow_api.presentation.deps import CurrentUser, DbDep
 
 router = APIRouter(prefix="/api/v1/crossing", tags=["cruzamento"])
 
+_MEDIA = {
+    "csv": "text/csv; charset=utf-8",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
-class LookupPreviewIn(BaseModel):
+
+class LookupIn(BaseModel):
     left_id: str = Field(min_length=1, max_length=36)
     right_id: str = Field(min_length=1, max_length=36)
     left_keys: list[str] = Field(min_length=1, max_length=10)
@@ -35,22 +47,39 @@ class LookupPreviewOut(BaseModel):
     sample: list[list[str | None]]
 
 
+class DerivedOut(BaseModel):
+    dataset_id: str
+    name: str
+    run_id: str
+    row_count: int
+    counts: dict[str, int]
+    result_sha256: str
+
+
+def _spec(payload: LookupIn) -> LookupSpec:
+    return LookupSpec(
+        left_keys=tuple(payload.left_keys),
+        right_keys=tuple(payload.right_keys),
+        return_columns=tuple(payload.return_columns),
+        policy=lk.LookupPolicy(duplicates=payload.duplicates, unmatched=payload.unmatched),
+    )
+
+
+def _correlation(request: Request) -> str | None:
+    value: str | None = getattr(request.state, "correlation_id", None)
+    return value
+
+
 @router.post("/lookup/preview", response_model=LookupPreviewOut)
 def lookup_preview(
-    payload: LookupPreviewIn,
+    payload: LookupIn,
     user: CurrentUser,
     db: DbDep,
     sample: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> LookupPreviewOut:
     left = get_dataset(db, payload.left_id)
     right = get_dataset(db, payload.right_id)
-    spec = LookupSpec(
-        left_keys=tuple(payload.left_keys),
-        right_keys=tuple(payload.right_keys),
-        return_columns=tuple(payload.return_columns),
-        policy=lk.LookupPolicy(duplicates=payload.duplicates, unmatched=payload.unmatched),
-    )
-    outcome = run_lookup(db, left, right, spec)
+    outcome = run_lookup(db, left, right, _spec(payload))
     result = outcome.result
     return LookupPreviewOut(
         columns=outcome.columns,
@@ -60,4 +89,50 @@ def lookup_preview(
         unmatched_keys=result.unmatched_keys,
         duplicate_keys=result.duplicate_keys,
         sample=[row for _, row in result.rows[:sample]],
+    )
+
+
+@router.post("/lookup/derive", response_model=DerivedOut, status_code=201)
+def lookup_derive(payload: LookupIn, request: Request, user: CurrentUser, db: DbDep) -> DerivedOut:
+    left = get_dataset(db, payload.left_id)
+    right = get_dataset(db, payload.right_id)
+    outcome = create_derived_lookup(
+        db,
+        left,
+        right,
+        _spec(payload),
+        actor=user.email,
+        correlation_id=_correlation(request),
+    )
+    db.commit()
+    return DerivedOut(
+        dataset_id=outcome.dataset.id,
+        name=outcome.dataset.name,
+        run_id=outcome.run.id,
+        row_count=outcome.row_count,
+        counts=outcome.counts,
+        result_sha256=outcome.run.result_sha256,
+    )
+
+
+@router.post("/lookup/export")
+def lookup_export(
+    payload: LookupIn,
+    user: CurrentUser,
+    db: DbDep,
+    format: Annotated[Literal["csv", "xlsx"], Query()] = "csv",
+) -> Response:
+    left = get_dataset(db, payload.left_id)
+    right = get_dataset(db, payload.right_id)
+    outcome = run_lookup(db, left, right, _spec(payload))
+    rows = [row for _, row in outcome.result.rows]
+    if format == "csv":
+        content = to_csv_bytes(outcome.columns, rows)
+    else:
+        content = to_xlsx_bytes([Sheet("Super-PROCV", outcome.columns, rows)])
+    filename = f"super-procv.{format}"
+    return Response(
+        content=content,
+        media_type=_MEDIA[format],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

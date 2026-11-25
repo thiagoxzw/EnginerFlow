@@ -7,20 +7,34 @@ execução é recusada (nunca truncada em silêncio).
 
 from __future__ import annotations
 
+import hashlib
+import json
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import insert, select
 from sqlalchemy.orm import Session as DbSession
 
+from engiflow_api.application.audit import record_event
 from engiflow_api.domain import lookup as lk
+from engiflow_api.domain.canonical import metadata_sha256, rows_sha256
 from engiflow_api.domain.errors import DomainError
-from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
+from engiflow_api.infrastructure.models import (
+    CrossingRun,
+    CrossingRunSource,
+    Dataset,
+    DatasetMetadataVersion,
+    DatasetVersion,
+    DatasetVersionRow,
+)
 
 MAX_OUTPUT_ROWS = 500_000
 MAX_LEFT_ROWS = 500_000
 STREAM_BATCH = 2_000
 CONFLICT_SUFFIX = " (direita)"
+LOOKUP_OPERATION_VERSION = 1
+_INSERT_BATCH = 2_000
 
 
 @dataclass(frozen=True)
@@ -120,3 +134,148 @@ def run_lookup(
         result=result,
         left_rows_read=counted,
     )
+
+
+@dataclass(frozen=True)
+class DerivedOutcome:
+    dataset: Dataset
+    run: CrossingRun
+    row_count: int
+    counts: dict[str, int]
+
+
+def _canonical_params(spec: LookupSpec, left_id: str, right_id: str) -> dict[str, Any]:
+    return {
+        "left_id": left_id,
+        "right_id": right_id,
+        "left_keys": list(spec.left_keys),
+        "right_keys": list(spec.right_keys),
+        "return_columns": list(spec.return_columns),
+        "policy": {"duplicates": spec.policy.duplicates, "unmatched": spec.policy.unmatched},
+    }
+
+
+def create_derived_lookup(
+    db: DbSession,
+    left: Dataset,
+    right: Dataset,
+    spec: LookupSpec,
+    *,
+    actor: str,
+    correlation_id: str | None,
+    max_output_rows: int | None = None,
+) -> DerivedOutcome:
+    """Executa o Super-PROCV e grava o resultado como tabela derivada, com rastreabilidade.
+
+    As origens não são alteradas. A execução congela as versões de dados e de metadados usadas.
+    """
+    outcome = run_lookup(db, left, right, spec, max_output_rows=max_output_rows)
+    rows = [list(values) for _, values in outcome.result.rows]
+    columns = outcome.columns
+
+    params = _canonical_params(spec, left.id, right.id)
+    params_json = json.dumps(params, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    counts = {**outcome.result.counts, "lado_consulta_lido": outcome.left_rows_read}
+    run = CrossingRun(
+        kind="lookup",
+        operation_version=LOOKUP_OPERATION_VERSION,
+        params=params,
+        params_sha256=hashlib.sha256(params_json.encode("utf-8")).hexdigest(),
+        policy=dict(params["policy"]),
+        counts=counts,
+        result_dataset_id=None,
+        result_sha256=rows_sha256(rows),
+        row_count=len(rows),
+        actor=actor,
+    )
+    db.add(run)
+    db.flush()
+
+    for role, dataset in (("left", left), ("right", right)):
+        if dataset.current_version_id is None or dataset.current_metadata_version_id is None:
+            raise DomainError("Tabela de origem sem versão atual.")
+        db.add(
+            CrossingRunSource(
+                run_id=run.id,
+                role=role,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                version_id=dataset.current_version_id,
+                metadata_version_id=dataset.current_metadata_version_id,
+            )
+        )
+
+    derived = Dataset(
+        name=f"{left.name} × {right.name} (Super-PROCV)"[:255],
+        source_filename="derivada",
+        source_sha256=hashlib.sha256(run.id.encode("utf-8")).hexdigest(),
+        file_kind="derived",
+        sheet_key="",
+        sheet_name=None,
+        columns=list(columns),
+        row_count=len(rows),
+        mapping={},
+        warnings=[],
+        source_kind="derived",
+        derived_run_id=run.id,
+    )
+    db.add(derived)
+    db.flush()
+
+    version = DatasetVersion(
+        id=derived.id,
+        dataset_id=derived.id,
+        number=1,
+        parent_version_id=None,
+        row_count=len(rows),
+        content_sha256=run.result_sha256,
+        schema_version=2,
+        pinned=True,
+    )
+    db.add(version)
+    db.flush()
+    for start in range(0, len(rows), _INSERT_BATCH):
+        db.execute(
+            insert(DatasetVersionRow),
+            [
+                {"version_id": version.id, "row_number": n, "values": values}
+                for n, values in enumerate(rows[start : start + _INSERT_BATCH], start=start + 1)
+            ],
+        )
+
+    metadata = DatasetMetadataVersion(
+        id=str(uuid.uuid4()),
+        dataset_id=derived.id,
+        version_id=version.id,
+        number=1,
+        parent_metadata_version_id=None,
+        columns=list(columns),
+        mapping={},
+        header_row=None,
+        metadata_sha256=metadata_sha256(columns, {}, None),
+        actor=actor,
+    )
+    db.add(metadata)
+    db.flush()
+    derived.current_version_id = version.id
+    derived.current_metadata_version_id = metadata.id
+    run.result_dataset_id = derived.id
+
+    record_event(
+        db,
+        actor=actor,
+        action="crossing.lookup.derive",
+        resource=f"dataset:{derived.id}",
+        result="ok",
+        correlation_id=correlation_id,
+        details={
+            "run_id": run.id,
+            "origens": [left.id, right.id],
+            "params_sha256": run.params_sha256,
+            "result_sha256": run.result_sha256,
+            "linhas": len(rows),
+            "contagens": counts,
+        },
+    )
+    db.flush()
+    return DerivedOutcome(dataset=derived, run=run, row_count=len(rows), counts=counts)

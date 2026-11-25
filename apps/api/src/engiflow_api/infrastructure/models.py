@@ -95,6 +95,9 @@ class Dataset(Base):
     )
     current_metadata_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 2B.3: "import" (arquivo original) ou "derived" (resultado de cruzamento, sem arquivo).
+    source_kind: Mapped[str] = mapped_column(String(10), nullable=False, default="import")
+    derived_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -239,3 +242,45 @@ class DatasetPreview(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class CrossingRun(Base):
+    """Execução de cruzamento (2B.3) que gerou uma tabela derivada. Imutável após criada.
+
+    Congela o que foi usado: parâmetros canônicos, política, chaves, contagens e o hash do
+    resultado. Não depende de edições posteriores das origens.
+    """
+
+    __tablename__ = "crossing_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    operation_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    params_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    counts: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    result_dataset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    result_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CrossingRunSource(Base):
+    """Tabela de origem de uma execução, com as versões exatas usadas (congeladas)."""
+
+    __tablename__ = "crossing_run_sources"
+    __table_args__ = (UniqueConstraint("run_id", "role", name="uq_crossing_run_sources_role"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("crossing_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # left | right
+    dataset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    dataset_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    metadata_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
