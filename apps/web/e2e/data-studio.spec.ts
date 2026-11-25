@@ -26,7 +26,11 @@ test("importa, filtra, substitui em lote com prévia e desfaz pelo histórico", 
   await page.goto("/data-studio");
   await page.getByLabel("Arquivo (.csv ou .xlsx)").setInputFiles(FIXTURE);
   await page.getByRole("button", { name: "Importar" }).click();
-  await page.getByRole("button", { name: "SYN-e2e" }).click();
+  await page
+    .getByRole("listitem")
+    .filter({ hasText: "SYN-e2e" })
+    .getByRole("button", { name: "Abrir" })
+    .click();
   await expect(page.getByRole("region", { name: "Dados" })).toBeVisible();
 
   // Filtro: quantidade maior que 5 (10 e 7,5; zero não casa)
