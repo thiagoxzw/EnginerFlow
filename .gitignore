@@ -68,3 +68,7 @@ secrets.*
 
 # Fixture sintética de E2E (dados SYN-, nunca reais).
 !apps/web/e2e/fixtures/SYN-*.csv
+
+# Artefatos do Playwright (traces, capturas) — gerados localmente e no CI.
+apps/web/test-results/
+apps/web/playwright-report/
