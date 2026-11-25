@@ -1,4 +1,6 @@
-"""Medição da Fase 2B.3 em PostgreSQL com dados SINTÉTICOS (Super-PROCV, junção, comparação, agregação).
+"""Medição da Fase 2B.3 em PostgreSQL com dados SINTÉTICOS.
+
+Cobre Super-PROCV, junção, comparação e agregação.
 
 Uso (somente em banco de teste: o script APAGA o schema public do banco indicado):
     ENGIFLOW_BENCH_DATABASE_URL=postgresql+psycopg://... \
@@ -38,7 +40,7 @@ from engiflow_api.infrastructure.readers import ImportLimits
 
 
 def make_left(path: Path, rows: int) -> None:
-    """Consulta: códigos com zeros; a cada 50 linhas uma chave vazia; a cada 97 uma chave repetida."""
+    """Consulta: zeros à esquerda; chave vazia a cada 50 linhas; repetida a cada 97."""
     with path.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write("SYN-Código;SYN-Unidade;SYN-Qtd\n")
         for i in range(1, rows + 1):
@@ -185,7 +187,9 @@ def main() -> int:
                 return_columns=("SYN-Preço",),
                 policy=lk.LookupPolicy(duplicates="first", unmatched="keep_empty"),
             )
-            cx.create_derived_lookup(db, left, right, spec, actor="bench@example.com", correlation_id="bench")
+            cx.create_derived_lookup(
+                db, left, right, spec, actor="bench@example.com", correlation_id="bench"
+            )
             db.commit()
 
         for label, action in [
