@@ -9,6 +9,8 @@ const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, im
 
 async function login(page: Page) {
   await page.goto("/login");
+  // Espera o React hidratar antes de preencher: evita clique antes do formulário estar ativo.
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("E-mail").fill(EMAIL);
   await page.getByLabel("Senha").fill(PASSWORD);
   await page.getByRole("button", { name: /entrar/i }).click();
