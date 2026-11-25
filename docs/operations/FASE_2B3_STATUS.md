@@ -145,3 +145,41 @@ O CI do GitHub é verificado no commit final antes de qualquer recomendação de
 > Fase 2B.3 concluída: cruzamentos e comparações de tabelas (PROCV, junção, comparação por chave, agregação e fórmulas), com prévia e aplicação, histórico, rastreabilidade e idempotência. Inclui migração 0006 (chave de idempotência). Fase 3 em commits separados para revisão independente.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+## Fase 3 — Estabilização, correções e otimização do Data Studio (entrega)
+
+Uma única etapa, em commits separados no mesmo branch, para revisão independente.
+
+### Entregue
+
+- **Seleção:** arraste do mouse; Shift+clique; Shift+setas; Ctrl+A (células da página); clique no número da linha (linha inteira); clique na área do cabeçalho (coluna inteira); Home, End, Ctrl+Home, Ctrl+End, PageUp e PageDown.
+- **Estrutura (operações versionadas):** `insert_rows`, `duplicate_rows`, `insert_column`, `duplicate_column` e `delete_columns`, além da exclusão de linhas existente. Todas passam por prévia, aplicação, histórico e desfazer. Linhas e colunas novas começam vazias (`""`); desconhecidos copiados ficam desconhecidos.
+- **Edição em massa:** limpar, preencher para baixo (Ctrl+D) e aplicar um valor à seleção gravam uma única operação `set_cells`. Acima de 20 células pedem confirmação. Vazio, zero e desconhecido são preservados.
+- **Área de transferência:** Ctrl+C copia o intervalo inteiro em TSV (colunas ocultas ficam de fora). Zeros à esquerda não são convertidos.
+- **Organização por tabela:** redimensionamento por arraste na borda do cabeçalho; duplo clique ajusta ao conteúdo; reordenação e fixação de colunas pelo menu contextual; ocultação (já existente). Preferências guardadas neste navegador, por tabela, sem gerar versão.
+- **Persistência:** a tabela aberta permanece após atualizar a página, neste navegador.
+- **Fórmulas:** `E`, `OU`, `SEERRO`, `ARRED`, `ABS`, `ARRUMAR`, `NUM.CARACT`, `VERDADEIRO` e `FALSO`; aliases `MÍNIMO`, `MÁXIMO`, `CONTAGEM`, `CONCATENAR`, `MAIÚSCULA` e `MINÚSCULA`. As funções já corretas não foram alteradas. Sem `eval`, com `Decimal`.
+- **Correção de ordem:** inserir e duplicar linhas renumeram as linhas na ordem exibida, como em planilha. A leitura ordena por número, e a versão não guarda posição. A exclusão continua preservando os números.
+
+### Decisões
+
+- **Limpeza grava vazio (`""`)**, não desconhecido, conforme aprovado.
+- **Reordenação e largura são preferências de visualização.** Não entram no histórico de dados, por não alterarem o conteúdo.
+- **Versionamento:** mantido o modelo de snapshots completos. Cada operação de dados grava a tabela inteira. A avaliação de um modelo incremental concluiu que a mudança alteraria o formato de armazenamento de todas as versões existentes, com risco de integridade e rastreabilidade, e não era segura sem migração destrutiva. Por isso não foi implementada. Medição atual no demonstrativo (somente leitura): 3786 linhas de versão, cerca de 1,1 MB; a tabela `Codigos totus - separado` (1706 linhas) tem uma versão, sem cópias extras. Estimativa (não medida, a partir de cerca de 290 bytes por linha de versão medidos): cada operação de dados numa tabela de 500 mil linhas grava outra cópia completa, da ordem de 150 MB. Esse é o principal ponto de crescimento a tratar numa próxima fase.
+- **Virtualização de linhas não foi implementada:** a grade já pagina em 50 linhas por página, o que mantém o número de nós renderizados limitado. Virtualização de colunas foi avaliada e não é necessária no volume atual (poucas colunas por tabela).
+
+### Limitações conhecidas (não críticas)
+
+- O menu contextual abre com clique direito; não há tecla de menu nem atalho para inserir ou excluir linhas e colunas.
+- Ao fixar colunas, apenas as colunas fixadas ficam sticky; o checkbox e o número da linha rolam para fora.
+- Não há testes E2E específicos para os novos controles (cobertos por testes unitários de interface e por testes HTTP da API).
+- Células com quebra de linha ou tabulação são copiadas sem aspas (TSV simples); colar esse texto pode dividir linhas. O Excel usa aspas nesses casos, e isso não é tratado.
+
+### Validação
+
+- API: suíte completa, 329 testes aprovados. Ruff e mypy sem erros.
+- Web: typecheck, ESLint sem alertas e 101 testes de unidade aprovados.
+- Testes direcionados das operações estruturais (unitários e HTTP com desfazer) e das fórmulas novas.
+- Migrações: nenhuma migração nova nesta fase.
+- Benchmarks de cruzamento: não repetidos, por não terem sido afetados pelas alterações.
+- E2E isolado e CI do commit final: ver a seção de entrega no relatório da sessão.

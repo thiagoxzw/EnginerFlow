@@ -4,9 +4,12 @@ Atualizado em 2026-11-25. Leia antes de retomar. Não contém credenciais nem da
 
 ## Estado
 - Branch: `feat/fase-2b-3-data-crossing`. PR #4 (draft). **Não fazer merge** sem autorização.
-- Último commit com CI verde (Web, API, E2E): `1a6a285`.
+- Fase 2B encerrada. Run #64 (commit `f0a432a`) aprovada. Fase 3 implementada em commits separados, no mesmo branch (de `94e68f7` até o último commit, ver `git log`).
+- Último commit da Fase 3 com validação local completa: ver `FASE_2B3_STATUS.md`, seção da Fase 3. O CI do commit mais recente deve ser conferido no GitHub.
 - Fase 2B.4 não existe no roadmap oficial: o escopo foi consolidado na Fase 2B (ver `docs/roadmap/FASE_2B_CONSOLIDACAO.md`).
-- Demonstrativo atualizado: migração `0006_crossing_idempotency` aplicada; API e web saudáveis; dados preservados (40 tabelas, inclusive `Codigos totus - separado` com 1706 linhas).
+- Demonstrativo: migração `0006_crossing_idempotency` aplicada; dados preservados. Em 2026-11-25 foram removidas logicamente 37 tabelas sintéticas e a cópia sem histórico de `Codigos totus - separado`. Permanece a cópia `6aebaf7e…` (1706 linhas, com o mapeamento v2).
+- Não há migração nova na Fase 3.
+- Próximos itens (fora desta fase): compressão e retenção de snapshots, e a decisão sobre versionamento incremental, dependendo da medição de crescimento em tabelas grandes. Fase 4 e BOM Manager não foram iniciados.
 
 ## Testes (no commit final)
 - API: ruff, format, mypy e pytest — ver `FASE_2B3_STATUS.md`.

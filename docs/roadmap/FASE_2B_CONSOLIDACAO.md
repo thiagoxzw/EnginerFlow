@@ -30,11 +30,13 @@ Duplicatas / Rastreabilidade).
 
 ## Transferido para a Fase 3 (não crítico ou risco estrutural)
 
-- Versionamento incremental por diferenças (o atual usa snapshots completos; medido e documentado).
-- Compressão e retenção de snapshots.
-- Fórmulas além do conjunto inicial (funções financeiras, estatísticas avançadas, referências entre tabelas).
-- Seleção de intervalos com operações em massa de colar sobre múltiplas colunas além de um lote de operações.
-- Crescimento do banco não medido nas execuções de benchmark (ver BENCHMARK_2B3.md).
+Status em 2026-11-25 (detalhes em `docs/operations/FASE_2B3_STATUS.md`, seção da Fase 3):
+
+- Versionamento incremental por diferenças: **avaliado e não implementado** (risco de integridade e rastreabilidade sem migração destrutiva). Snapshots completos mantidos e documentados.
+- Compressão e retenção de snapshots: **não implementadas**; próxima prioridade de armazenamento.
+- Fórmulas além do conjunto inicial: **entregues** (E, OU, SEERRO, ARRED, ABS, ARRUMAR, NUM.CARACT e aliases). Funções financeiras, estatísticas e referências entre tabelas ficam fora.
+- Seleção de intervalos com operações em massa: **entregue** (seleção por mouse e teclado, edição em massa, preenchimento e cópia de intervalo, todas em uma operação).
+- Crescimento do banco: **medido** de forma somente leitura no demonstrativo; estimativa para 500 mil linhas documentada, não medida em benchmark.
 
 ## Critérios de conclusão da Fase 2B
 
