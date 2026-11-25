@@ -12,9 +12,18 @@ function Assert-Docker {
 }
 
 function Invoke-Compose {
+    # docker escreve progresso no stderr; com ErrorActionPreference=Stop isso viraria exceção.
+    # O critério de falha é o código de saída.
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-    & docker compose -f $script:ComposeFile @Args
-    if ($LASTEXITCODE -ne 0) { throw "docker compose $($Args -join ' ') falhou (código $LASTEXITCODE)." }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker compose -f $script:ComposeFile @Args 2>&1 | ForEach-Object { "$_" }
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($code -ne 0) { throw "docker compose $($Args -join ' ') falhou (código $code)." }
 }
 
 function Get-ServiceHealth {

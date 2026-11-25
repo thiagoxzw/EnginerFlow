@@ -51,3 +51,20 @@ Datas: **não definidas**. Dependem de decisões em `decisions/OPEN_QUESTIONS.md
 | 3 — BOM Manager | Não iniciada (não autorizada) | — |
 
 
+
+## Roadmap oficial (atualizado em 2026-11-25)
+
+- Fase 0 — Arquitetura e planejamento
+- Fase 1 — Fundação
+- Fase 2A — Data Studio Core
+- **Fase 2B — Data Studio completo** (em revisão final; ver docs/roadmap/FASE_2B_CONSOLIDACAO.md e docs/operations/FASE_2B3_STATUS.md)
+- Fase 3 — Estabilização, correções e otimização do Data Studio
+- Fase 4 — BOM Manager
+- Fase 5 — Material Manager
+- Fase 6 — Inventory Manager
+- Fase 7 — Solid Edge Connect
+- Fase 8 — ERP Connect
+- Fase 9 — Workflow Studio
+- Fase 10 — AI Copilot
+
+Os documentos das subdivisões anteriores (2B.1, 2B.2, 2B.3 bloco 1) são históricos e foram preservados.

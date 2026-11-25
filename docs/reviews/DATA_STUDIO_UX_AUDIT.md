@@ -112,3 +112,24 @@ Capturas e resultados brutos ficam fora do repositório, em `C:\Dev\EngiFlow-dad
 5. Continuação da 2B.3 (Super-PROCV e junções com tela, comparação avançada, agrupamento).
 
 Itens fora desta etapa: editor completo de células, virtualização, cálculos e otimização de armazenamento (2B.4).
+
+## Medições pós-reorganização (dados sintéticos, isolated E2E)
+
+| Resolução | Topo da tabela antes (px) | depois (px) | Altura da página antes | depois | Overflow horizontal |
+|---|---|---|---|---|---|
+| 1920×1080 | 137 | 141 | 1697 | 1080 | 0 / 0 |
+| 1440×900 | 137 | 141 | 1861 | 900 | 0 / 0 |
+| 1366×768 | 137 | 141 | 1861 | 811 | 0 / 0 |
+| 390×844 | 1031 (primeira linha fora da tela) | 249 (visível) | 3117 | 1849 | 0 / 0 |
+
+Capturas e métricas ficam no diretório de evidências local (não versionado), com dados sintéticos.
+
+### Problemas encontrados nesta etapa
+- Mobile: lateral de importação e lista antes da tabela (corrigido pela ordem visual no celular).
+- Título duplicado na lateral (corrigido).
+- Ações de linha ocupando espaço vazio (agora contextuais).
+- Confirmação de ação sumia com a seleção (agora na barra da tabela).
+
+### Pendências de experiência para a Fase 3
+- Reordenar e redimensionar colunas; fixação de colunas.
+- Seleção de intervalos com Shift+setas; Ctrl+A e Delete.

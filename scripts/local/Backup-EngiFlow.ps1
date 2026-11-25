@@ -13,9 +13,20 @@ Invoke-Compose cp "postgres:/tmp/engiflow-backup.dump" $dump
 Invoke-Compose exec -T postgres sh -c "rm -f /tmp/engiflow-backup.dump"
 Write-Host "Dump do banco: $dump"
 
-$volume = (docker volume ls -q --filter "name=engiflow-data" | Select-Object -First 1)
+# Nome EXATO do volume deste projeto ("engiflow" + "_engiflow-data"). Um filtro por substring
+# poderia pegar o volume de outro projeto (auditoria, E2E) e copiar os arquivos errados.
+$volume = (docker volume ls -q | Where-Object { $_ -eq "engiflow_engiflow-data" } | Select-Object -First 1)
 if ($volume) {
     $tar = "engiflow-originais-$stamp.tar"
-    docker run --rm -v "${volume}:/data:ro" -v "${dir}:/backup" alpine tar -cf "/backup/$tar" -C /data . | Out-Null
+    # docker escreve a baixa da imagem no stderr: o critério é o código de saída.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        docker run --rm -v "${volume}:/data:ro" -v "${dir}:/backup" alpine tar -cf "/backup/$tar" -C /data . 2>&1 | ForEach-Object { "$_" } | Out-Null
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($code -ne 0) { throw "Cópia dos arquivos originais falhou (código $code)." }
     Write-Host "Arquivos originais: $(Join-Path $dir $tar)"
 }
