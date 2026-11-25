@@ -126,7 +126,7 @@ def test_duplicate_rows_increases_count_and_undo_restores(
 def test_structural_change_does_not_alter_derived_table_or_its_lineage(
     logged_client: TestClient, storage_settings: Settings
 ) -> None:
-    """Renumerar linhas da origem não muda a tabela derivada (versão congelada) nem a rastreabilidade."""
+    """Renumerar linhas da origem não muda a derivada (versão congelada) nem a rastreabilidade."""
     source = _import(logged_client)
     derived = logged_client.post(
         "/api/v1/crossing/formula/derive",
