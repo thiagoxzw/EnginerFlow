@@ -35,6 +35,7 @@ from sqlalchemy.orm import sessionmaker
 from engiflow_api.application import crossing as cx
 from engiflow_api.application import data_studio as ds
 from engiflow_api.domain import lookup as lk
+from engiflow_api.domain.errors import DomainError
 from engiflow_api.infrastructure.models import Base, Dataset
 from engiflow_api.infrastructure.readers import ImportLimits
 
@@ -165,8 +166,15 @@ def main() -> int:
             )
             cx.run_lookup(db, left, right, spec, max_output_rows=2_000_000)
 
+        refusals: dict[str, str] = {}
+
         def join_preview(db: DbSession, left: Dataset, right: Dataset) -> None:
-            cx.run_join(db, left, right, keys_left, keys_right, "left")
+            # Com duplicatas nos dois lados a junção pode passar do limite: a recusa acontece no
+            # planejamento (antes de materializar) e é medida como resultado, não como falha.
+            try:
+                cx.run_join(db, left, right, keys_left, keys_right, "left")
+            except DomainError as exc:
+                refusals["junção esquerda"] = str(exc)
 
         def compare_preview(db: DbSession, left: Dataset, right: Dataset) -> None:
             cx.run_comparison(
@@ -214,6 +222,8 @@ def main() -> int:
     print(f"{'caso':<56}{'segundos':>10}{'pico_MB':>10}")
     for row in results:
         print(f"{row['caso']!s:<56}{row['segundos']!s:>10}{row['pico_MB']!s:>10}")
+    for case, message in refusals.items():
+        print(f"recusa esperada ({case}): {message}")
     engine.dispose()
     return 0
 
