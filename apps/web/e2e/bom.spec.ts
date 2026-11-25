@@ -124,9 +124,9 @@ test("kit calcula materiais por veículo e lote", async ({ page }) => {
   await importBom(page, table, structure);
 
   await page.getByRole("tab", { name: "Kits" }).click();
-  await page.getByLabel("Nome do kit").fill("Kit tração");
+  await page.getByLabel("Nome do kit", { exact: true }).fill("Kit tração");
   await page.getByLabel("Subconjuntos do kit").fill("CONJ-SYN-TRAC;1");
-  await page.getByRole("button", { name: "Salvar kit" }).click();
+  await page.getByRole("button", { name: "Salvar kit", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Kit criado." })).toBeVisible();
 
   await page.getByLabel("Kit para cálculo").selectOption({ label: "Kit tração" });
@@ -149,7 +149,7 @@ test("duplicação completa cria códigos provisórios marcados e não altera o 
 
   await page.getByRole("tab", { name: "Estrutura" }).click();
   await page.getByLabel("Buscar na estrutura").fill("CONJ-SYN-TRAC");
-  await page.getByRole("button", { name: /CONJ-SYN-TRAC/ }).first().click();
+  await page.getByRole("button", { name: /^CONJ-SYN-TRAC/ }).first().click();
   await page.getByLabel("Novo código do conjunto duplicado").fill(`CONJ-COPIA-${uid}`);
   await page.getByRole("button", { name: "Duplicar conjunto completo" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Conjunto completo duplicado" })).toBeVisible();
