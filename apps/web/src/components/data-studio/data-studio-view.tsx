@@ -543,6 +543,14 @@ function CompareSection({ datasets }: { datasets: DatasetSummary[] }) {
         <DatasetSelect id="esq" label="Tabela A" value={left} onChange={setLeft} datasets={datasets} />
         <DatasetSelect id="dir" label="Tabela B" value={right} onChange={setRight} datasets={datasets} />
       </div>
+      {[left, right]
+        .map((id) => datasets.find((d) => d.id === id))
+        .some((d) => d && !d.mapping.code) ? (
+        <p role="status" className="text-sm text-[var(--color-danger)]">
+          Falta mapear a coluna de código em uma das tabelas. Faça o mapeamento em &ldquo;Mapeamento, cabeçalho e
+          modelos&rdquo;, dentro da tabela, antes de comparar.
+        </p>
+      ) : null}
       <button
         type="button"
         disabled={!left || !right || left === right || compare.isPending}
