@@ -4,6 +4,17 @@ Formato: Keep a Changelog. Versionamento: Semantic Versioning (ainda sem versão
 
 ## [Unreleased]
 
+### Adicionado (Fase 2B.2 — Manipulação de dados, em desenvolvimento no PR #3)
+- Versionamento de mapeamentos e metadados: estado = (versão de dados, versão de metadados); operações só de metadados não copiam linhas; migração 0004 preserva histórico.
+- Modelos de mapeamento reutilizáveis, com versão de definição e confirmação para colunas ausentes.
+- Seleção manual de cabeçalho: reconstrução a partir do arquivo original, com histórico preservado.
+- Filtros combinados, pesquisa global sem acento, ordenação determinística e paginação no servidor; vazio, desconhecido e zero são estados distintos.
+- Localizar e substituir em lote por colunas e filtros, com prévia obrigatória e contagens.
+- Seleção e transformação de linhas: atualização em lote e exclusão lógica com desfazer.
+- Renomear, excluir logicamente (com confirmação do nome exato) e restaurar tabelas.
+- Histórico com desfazer e refazer (Ctrl+Z, Ctrl+Y) e tratamento de conflitos.
+- Testes de ponta a ponta (Playwright) e job de E2E com PostgreSQL 17 no CI.
+
 ### Adicionado (Fase 2B.1 — Fundação das transformações)
 - Revisão de integridade: 9 testes cobrindo idempotência com parâmetros diferentes, prévias após undo/redo, nova operação após múltiplos undos, mapeamentos em renomeações, rollback completo, zeros e vazios através das operações, imutabilidade de versões e hash armazenado.
 - Planejamento detalhado da 2B.2 (`docs/roadmap/FASE_2B2_PLANO.md`).
