@@ -72,3 +72,7 @@ secrets.*
 # Artefatos do Playwright (traces, capturas) — gerados localmente e no CI.
 apps/web/test-results/
 apps/web/playwright-report/
+
+# Ambiente local: dados demonstrativos gerados e backups do banco (nunca versionar).
+demo-data/
+backups/
