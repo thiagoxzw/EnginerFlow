@@ -173,7 +173,7 @@ Uma única etapa, em commits separados no mesmo branch, para revisão independen
 - O menu contextual abre com clique direito; não há tecla de menu nem atalho para inserir ou excluir linhas e colunas.
 - Ao fixar colunas, apenas as colunas fixadas ficam sticky; o checkbox e o número da linha rolam para fora.
 - Não há testes E2E específicos para os novos controles (cobertos por testes unitários de interface e por testes HTTP da API).
-- Células com quebra de linha ou tabulação são copiadas sem aspas (TSV simples); colar esse texto pode dividir linhas. O Excel usa aspas nesses casos, e isso não é tratado.
+- Nenhuma limitação de TSV nesta fase: células com tabulação, quebra de linha ou aspa são copiadas e coladas no formato do Excel (entre aspas, com aspas duplicadas), inclusive a célula única. Cobertura: testes de unidade em `clipboard.test.ts` e o E2E de copiar e colar em `fase3-estrutura.spec.ts`.
 
 ### Validação
 
