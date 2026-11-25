@@ -12,6 +12,7 @@ import {
   DeletedTablesSection,
   TableAdminSection,
 } from "@/components/data-studio/table-admin";
+import { CrossLookupSection } from "@/components/data-studio/cross-lookup-section";
 import { ReplaceSection } from "@/components/data-studio/replace-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
@@ -126,7 +127,14 @@ export function DataStudioView() {
 
         <main className="min-w-0 space-y-6">
           {selectedId ? (
-            <DatasetPanel datasetId={selectedId} onDeleted={() => setSelectedId(null)} />
+            <DatasetPanel
+              datasetId={selectedId}
+              onDeleted={() => setSelectedId(null)}
+              onOpen={(id) => {
+                setSelectedId(id);
+                void queryClient.invalidateQueries({ queryKey: ["datasets"] });
+              }}
+            />
           ) : (
             <section className={sectionClass}>
               <h2 className="font-medium">Nenhuma tabela aberta</h2>
@@ -214,12 +222,21 @@ function UploadSection({ onImported }: { onImported: (id: string) => void }) {
   );
 }
 
-function DatasetPanel({ datasetId, onDeleted }: { datasetId: string; onDeleted: () => void }) {
+function DatasetPanel({
+  datasetId,
+  onDeleted,
+  onOpen,
+}: {
+  datasetId: string;
+  onDeleted: () => void;
+  onOpen: (id: string) => void;
+}) {
   const queryClient = useQueryClient();
   const detail = useQuery({
     queryKey: ["dataset", datasetId],
     queryFn: () => getDataset(datasetId),
   });
+  const allDatasets = useQuery({ queryKey: ["datasets"], queryFn: listDatasets });
 
   if (detail.isPending) {
     return <p className="text-sm text-[var(--color-muted)]">Carregando tabela…</p>;
@@ -297,6 +314,18 @@ function DatasetPanel({ datasetId, onDeleted }: { datasetId: string; onDeleted: 
           <TemplatesSection
             datasetId={datasetId}
             onApplied={() => void queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] })}
+          />
+        </div>
+      </details>
+
+      <details className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Cruzar com outra tabela (PROCV)</summary>
+        <div className="pt-3">
+          <CrossLookupSection
+            leftId={datasetId}
+            leftColumns={data.columns}
+            datasets={allDatasets.data ?? []}
+            onDerived={onOpen}
           />
         </div>
       </details>
