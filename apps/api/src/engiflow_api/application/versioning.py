@@ -104,6 +104,8 @@ def load_snapshot(db: DbSession, state: State) -> Snapshot:
         row_numbers=[number for number, _ in rows],
         mapping=dict(meta.mapping or {}),
         header_row=meta.header_row,
+        template_id=meta.template_id,
+        template_definition_version=meta.template_definition_version,
     )
 
 
@@ -256,8 +258,6 @@ def _write_metadata_version(
     data_version_id: str,
     parent_id: str,
     snapshot: Snapshot,
-    template_id: str | None = None,
-    template_definition_version: int | None = None,
     actor: str = "sistema",
 ) -> DatasetMetadataVersion:
     meta = DatasetMetadataVersion(
@@ -270,8 +270,8 @@ def _write_metadata_version(
         mapping=dict(snapshot.mapping),
         header_row=snapshot.header_row,
         metadata_sha256=metadata_sha256(snapshot.columns, snapshot.mapping, snapshot.header_row),
-        template_id=template_id,
-        template_definition_version=template_definition_version,
+        template_id=snapshot.template_id,
+        template_definition_version=snapshot.template_definition_version,
         actor=actor,
     )
     db.add(meta)

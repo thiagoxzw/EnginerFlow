@@ -32,6 +32,9 @@ class Snapshot:
     row_numbers: list[int]
     mapping: dict[str, str] = field(default_factory=dict)
     header_row: int | None = None
+    # Referência ao template que originou o mapeamento (None quando mapeado manualmente).
+    template_id: str | None = None
+    template_definition_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +176,43 @@ def _set_rows_value(snapshot: Snapshot, params: SetRowsValueParams) -> Operation
     )
 
 
+class ApplyTemplateParams(_Strict):
+    template_id: str = Field(min_length=1, max_length=36)
+    definition_version: int = Field(ge=1)
+    # Mapeamento copiado do template no momento da prévia (a aplicação usa exatamente isto).
+    mapping: dict[str, str] = Field(default_factory=dict)
+    # Colunas do modelo ausentes na tabela só são ignoradas com confirmação explícita.
+    allow_missing: bool = False
+
+
+def _apply_mapping_template(snapshot: Snapshot, params: ApplyTemplateParams) -> OperationResult:
+    unknown_fields = sorted(set(params.mapping) - set(CANONICAL_FIELDS))
+    if unknown_fields:
+        raise DomainError(f"Campos desconhecidos no modelo: {', '.join(unknown_fields)}.")
+    present = {f: c for f, c in params.mapping.items() if c in snapshot.columns}
+    absent = {f: c for f, c in params.mapping.items() if c not in snapshot.columns}
+    if absent and not params.allow_missing:
+        names = ", ".join(sorted(set(absent.values())))
+        raise DomainError(
+            f"Colunas do modelo não existem nesta tabela: {names}. "
+            "Confirme para aplicar mesmo assim (campos ausentes ficam sem mapeamento)."
+        )
+    warnings = [
+        f"Campo '{f}' sem coluna correspondente ('{c}'): ignorado." for f, c in absent.items()
+    ]
+    return OperationResult(
+        snapshot=_with(
+            snapshot,
+            mapping=present,
+            template_id=params.template_id,
+            template_definition_version=params.definition_version,
+        ),
+        rows_affected=0,
+        cells_changed=0,
+        warnings=warnings,
+    )
+
+
 def _set_mapping(snapshot: Snapshot, params: SetMappingParams) -> OperationResult:
     unknown_fields = sorted(set(params.mapping) - set(CANONICAL_FIELDS))
     if unknown_fields:
@@ -216,6 +256,15 @@ OPERATIONS: dict[str, OperationSpec] = {
         reversible=True,
         touches_data=False,
         apply=_set_mapping,
+    ),
+    "apply_mapping_template": OperationSpec(
+        code="apply_mapping_template",
+        version=1,
+        description="Aplica um modelo de mapeamento reutilizável. Só metadados.",
+        params_model=ApplyTemplateParams,
+        reversible=True,
+        touches_data=False,
+        apply=_apply_mapping_template,
     ),
     "replace_text": OperationSpec(
         code="replace_text",

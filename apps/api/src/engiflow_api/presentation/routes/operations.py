@@ -136,6 +136,7 @@ class MetadataVersionOut(BaseModel):
     header_row: int | None
     metadata_sha256: str
     template_id: str | None
+    template_definition_version: int | None
     actor: str
     created_at: datetime
     is_current: bool
@@ -155,6 +156,7 @@ def metadata_versions(dataset_id: str, user: CurrentUser, db: DbDep) -> list[Met
             header_row=m.header_row,
             metadata_sha256=m.metadata_sha256,
             template_id=m.template_id,
+            template_definition_version=m.template_definition_version,
             actor=m.actor,
             created_at=m.created_at,
             is_current=m.id == dataset.current_metadata_version_id,

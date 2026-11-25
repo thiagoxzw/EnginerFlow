@@ -100,7 +100,13 @@ def _snap() -> Snapshot:
 
 
 def test_registry_lists_the_minimal_operations() -> None:
-    assert set(OPERATIONS) == {"rename_column", "set_mapping", "replace_text", "set_rows_value"}
+    assert set(OPERATIONS) == {
+        "rename_column",
+        "set_mapping",
+        "apply_mapping_template",
+        "replace_text",
+        "set_rows_value",
+    }
     with pytest.raises(DomainError, match="desconhecida"):
         get_operation("eval_python")
 
@@ -227,7 +233,13 @@ def test_catalog_endpoint_exposes_schemas(
 ) -> None:
     body = logged_client.get("/api/v1/operations/catalog").json()
     codes = {item["code"] for item in body}
-    assert codes == {"rename_column", "set_mapping", "replace_text", "set_rows_value"}
+    assert codes == {
+        "rename_column",
+        "set_mapping",
+        "apply_mapping_template",
+        "replace_text",
+        "set_rows_value",
+    }
     assert all("properties" in item["params_schema"] for item in body)
 
 

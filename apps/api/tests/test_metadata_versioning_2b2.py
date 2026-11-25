@@ -134,6 +134,34 @@ def test_preview_is_rejected_after_metadata_changed(
     assert detail["columns"] == ["SYN-Código", "SYN-Descrição", "Qtd"]  # nada mudou
 
 
+def test_legacy_requests_without_metadata_base_cannot_overwrite_stale_metadata(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    """Cliente 2B.1 (sem base de metadados): a prévia guarda os metadados vistos no momento
+    da prévia. Se os metadados mudarem antes da aplicação, a aplicação é recusada."""
+    ds = _import(logged_client)
+    data_id, _ = _state(logged_client, ds["id"])
+    prev = logged_client.post(
+        f"/api/v1/datasets/{ds['id']}/operations/preview",
+        json={
+            "code": "rename_column",
+            "params": {"from_name": "Qtd", "to_name": "Quantidade"},
+            "base_version_id": data_id,
+        },
+    )
+    assert prev.status_code == 200, prev.text
+    logged_client.put(
+        f"/api/v1/datasets/{ds['id']}/mapping", json={"mapping": {"code": "SYN-Código"}}
+    )
+    stale = logged_client.post(
+        f"/api/v1/datasets/{ds['id']}/operations",
+        json={"preview_id": prev.json()["preview_id"], "base_version_id": data_id},
+    )
+    assert stale.status_code == 409, stale.text
+    detail = logged_client.get(f"/api/v1/datasets/{ds['id']}").json()
+    assert detail["columns"][2] == "Qtd"
+
+
 def test_rename_is_metadata_only_and_undo_restores_name(
     logged_client: TestClient, storage_settings: Settings
 ) -> None:

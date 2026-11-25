@@ -11,6 +11,7 @@ from engiflow_api.presentation.middleware import configure_logging, correlation_
 from engiflow_api.presentation.routes.datasets import router as datasets_router
 from engiflow_api.presentation.routes.operations import router as operations_router
 from engiflow_api.presentation.routes.system import router as system_router
+from engiflow_api.presentation.routes.templates import router as templates_router
 
 
 def create_app(
@@ -42,6 +43,7 @@ def create_app(
     app.include_router(system_router)
     app.include_router(datasets_router)
     app.include_router(operations_router)
+    app.include_router(templates_router)
     return app
 
 
