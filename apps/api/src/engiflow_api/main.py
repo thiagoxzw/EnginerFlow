@@ -8,6 +8,7 @@ from engiflow_api.core.config import Settings, get_settings
 from engiflow_api.infrastructure.db import build_engine, build_session_factory
 from engiflow_api.presentation.errors import install_error_handlers
 from engiflow_api.presentation.middleware import configure_logging, correlation_middleware
+from engiflow_api.presentation.routes.crossing import router as crossing_router
 from engiflow_api.presentation.routes.datasets import router as datasets_router
 from engiflow_api.presentation.routes.operations import router as operations_router
 from engiflow_api.presentation.routes.system import router as system_router
@@ -44,6 +45,7 @@ def create_app(
     app.include_router(datasets_router)
     app.include_router(operations_router)
     app.include_router(templates_router)
+    app.include_router(crossing_router)
     return app
 
 
