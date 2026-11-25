@@ -7,6 +7,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api";
 import { DataTable } from "@/components/data-studio/data-table";
 import { HeaderSection } from "@/components/data-studio/header-section";
+import {
+  DeletedTablesSection,
+  TableAdminSection,
+} from "@/components/data-studio/table-admin";
 import { ReplaceSection } from "@/components/data-studio/replace-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
@@ -110,7 +114,11 @@ export function DataStudioView() {
         ) : null}
       </section>
 
-      {selectedId ? <DatasetPanel datasetId={selectedId} /> : null}
+      <DeletedTablesSection />
+
+      {selectedId ? (
+        <DatasetPanel datasetId={selectedId} onDeleted={() => setSelectedId(null)} />
+      ) : null}
 
       <CompareSection datasets={datasets.data ?? []} />
     </div>
@@ -190,7 +198,7 @@ function UploadSection({ onImported }: { onImported: (id: string) => void }) {
   );
 }
 
-function DatasetPanel({ datasetId }: { datasetId: string }) {
+function DatasetPanel({ datasetId, onDeleted }: { datasetId: string; onDeleted: () => void }) {
   const queryClient = useQueryClient();
   const detail = useQuery({
     queryKey: ["dataset", datasetId],
@@ -223,6 +231,8 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
         initial={data.mapping}
         onSaved={onSaved}
       />
+
+      <TableAdminSection datasetId={datasetId} name={data.name} onDeleted={onDeleted} />
 
       <HeaderSection datasetId={datasetId} />
 

@@ -21,7 +21,10 @@ from engiflow_api.application.data_studio import (
     find_duplicates,
     get_dataset,
     import_upload,
+    rename_dataset,
+    restore_dataset,
     set_mapping,
+    soft_delete_dataset,
     sweep_stale_temp_files,
 )
 from engiflow_api.application.table_query import matching_row_numbers, query_page
@@ -213,9 +216,62 @@ def upload(
 
 
 @router.get("", response_model=list[DatasetSummary])
-def list_datasets(user: CurrentUser, db: DbDep) -> list[DatasetSummary]:
-    rows = db.scalars(select(Dataset).order_by(Dataset.created_at.desc()).limit(200)).all()
+def list_datasets(
+    user: CurrentUser,
+    db: DbDep,
+    deleted: Annotated[bool, Query()] = False,
+) -> list[DatasetSummary]:
+    """Tabelas ativas por padrão; com `deleted=true`, as excluídas logicamente."""
+    condition = Dataset.deleted_at.is_not(None) if deleted else Dataset.deleted_at.is_(None)
+    rows = db.scalars(
+        select(Dataset).where(condition).order_by(Dataset.created_at.desc()).limit(200)
+    ).all()
     return [_summary(d) for d in rows]
+
+
+class RenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class DeleteIn(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=255)
+
+
+@router.patch("/{dataset_id}", response_model=DatasetSummary)
+def rename(
+    dataset_id: str, payload: RenameIn, request: Request, user: CurrentUser, db: DbDep
+) -> DatasetSummary:
+    dataset = get_dataset(db, dataset_id)
+    rename_dataset(
+        db, dataset, payload.name, actor=user.email, correlation_id=_correlation(request)
+    )
+    db.commit()
+    return _summary(dataset)
+
+
+@router.delete("/{dataset_id}", response_model=DatasetSummary)
+def delete(
+    dataset_id: str, payload: DeleteIn, request: Request, user: CurrentUser, db: DbDep
+) -> DatasetSummary:
+    """Exclusão lógica: exige o nome exato. A tabela pode ser restaurada."""
+    dataset = get_dataset(db, dataset_id)
+    soft_delete_dataset(
+        db,
+        dataset,
+        payload.confirm_name,
+        actor=user.email,
+        correlation_id=_correlation(request),
+    )
+    db.commit()
+    return _summary(dataset)
+
+
+@router.post("/{dataset_id}/restore", response_model=DatasetSummary)
+def restore(dataset_id: str, request: Request, user: CurrentUser, db: DbDep) -> DatasetSummary:
+    dataset = get_dataset(db, dataset_id, include_deleted=True)
+    restore_dataset(db, dataset, actor=user.email, correlation_id=_correlation(request))
+    db.commit()
+    return _summary(dataset)
 
 
 @router.get("/{dataset_id}", response_model=DatasetDetail)
