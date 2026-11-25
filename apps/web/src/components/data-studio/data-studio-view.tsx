@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError } from "@/lib/api";
+import { DataTable } from "@/components/data-studio/data-table";
 import { HeaderSection } from "@/components/data-studio/header-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
@@ -242,36 +243,7 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
         </section>
       ) : null}
 
-      <section className={sectionClass} aria-labelledby="previa">
-        <h2 id="previa" className="font-medium">
-          Prévia (primeiras {data.preview.length} linhas)
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-[var(--color-muted)]">
-              <tr>
-                {data.columns.map((c) => (
-                  <th key={c} className="px-2 py-1 font-medium">
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.preview.map((row, index) => (
-                <tr key={index} className="border-t border-[var(--color-border)]">
-                  {data.columns.map((c) => (
-                    <td key={c} className="px-2 py-1 font-mono text-xs">
-                      {row[c] ?? ""}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
+      <DataTable datasetId={datasetId} columns={data.columns} />
       <ExportButtons
         label="Exportar tabela"
         onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}

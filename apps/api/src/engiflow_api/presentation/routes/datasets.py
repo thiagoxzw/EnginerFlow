@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import uuid
 from datetime import datetime
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Form, Query, Request, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
@@ -23,8 +24,10 @@ from engiflow_api.application.data_studio import (
     set_mapping,
     sweep_stale_temp_files,
 )
+from engiflow_api.application.table_query import query_page
 from engiflow_api.core.config import get_settings
 from engiflow_api.domain.errors import DomainError
+from engiflow_api.domain.query import MAX_SEARCH, FilterIn, TableQuery
 from engiflow_api.domain.tabular import CodeComparison
 from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
 from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
@@ -229,6 +232,22 @@ def detail(dataset_id: str, user: CurrentUser, db: DbDep) -> DatasetDetail:
     return DatasetDetail(**base, preview=preview)
 
 
+def _parse_filters(raw: str | None) -> list[FilterIn]:
+    """Filtros chegam como JSON na query string. Qualquer formato inválido vira erro de regra."""
+    if not raw:
+        return []
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise DomainError("Filtros em formato JSON inválido.") from exc
+    if not isinstance(items, list):
+        raise DomainError("Filtros devem ser uma lista.")
+    try:
+        return [FilterIn.model_validate(item) for item in items]
+    except ValidationError as exc:
+        raise DomainError("Filtro inválido.") from exc
+
+
 @router.get("/{dataset_id}/rows", response_model=RowsOut)
 def rows(
     dataset_id: str,
@@ -236,8 +255,28 @@ def rows(
     db: DbDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    q: Annotated[str, Query(max_length=MAX_SEARCH)] = "",
+    filters: Annotated[str | None, Query(max_length=8000)] = None,
+    sort: Annotated[str | None, Query(max_length=255)] = None,
+    dir: Annotated[Literal["asc", "desc"], Query()] = "asc",
 ) -> RowsOut:
+    """Linhas da versão atual. Sem filtro/pesquisa/ordenação usa a leitura direta por página."""
     dataset = get_dataset(db, dataset_id)
+    query = TableQuery(
+        filters=_parse_filters(filters),
+        search=q,
+        sort_column=sort,
+        descending=dir == "desc",
+    )
+    if not query.is_plain():
+        total, page_rows = query_page(db, dataset, query, offset=offset, limit=limit)
+        return RowsOut(
+            total=total,
+            offset=offset,
+            limit=limit,
+            columns=list(dataset.columns),
+            rows=[RowOut(row_number=n, values=list(v)) for n, v in page_rows],
+        )
     total = (
         db.scalar(
             select(func.count())
