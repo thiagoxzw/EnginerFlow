@@ -213,6 +213,29 @@ def _apply_mapping_template(snapshot: Snapshot, params: ApplyTemplateParams) -> 
     )
 
 
+class SetHeaderParams(_Strict):
+    header_row: int = Field(ge=1, le=1_000_000)
+
+
+def _set_header_row(snapshot: Snapshot, params: SetHeaderParams) -> OperationResult:
+    """`snapshot` já foi reconstruído do arquivo original com o cabeçalho escolhido.
+
+    O mapeamento anterior é mantido só para colunas que ainda existem; o resto vira aviso.
+    """
+    mapping = {f: c for f, c in snapshot.mapping.items() if c in snapshot.columns}
+    warnings = [
+        f"Campo '{f}' sem coluna após trocar o cabeçalho ('{c}'): mapeamento removido."
+        for f, c in snapshot.mapping.items()
+        if c not in snapshot.columns
+    ]
+    return OperationResult(
+        snapshot=_with(snapshot, mapping=mapping, header_row=params.header_row),
+        rows_affected=len(snapshot.rows),
+        cells_changed=0,
+        warnings=warnings,
+    )
+
+
 def _set_mapping(snapshot: Snapshot, params: SetMappingParams) -> OperationResult:
     unknown_fields = sorted(set(params.mapping) - set(CANONICAL_FIELDS))
     if unknown_fields:
@@ -236,6 +259,8 @@ class OperationSpec:
     reversible: bool
     touches_data: bool
     apply: Callable[[Snapshot, Any], OperationResult]
+    # True quando o snapshot de entrada vem do arquivo original (reconstrução), não da versão atual.
+    needs_original: bool = False
 
 
 OPERATIONS: dict[str, OperationSpec] = {
@@ -256,6 +281,17 @@ OPERATIONS: dict[str, OperationSpec] = {
         reversible=True,
         touches_data=False,
         apply=_set_mapping,
+    ),
+    "set_header_row": OperationSpec(
+        code="set_header_row",
+        version=1,
+        description="Escolhe a linha real do cabeçalho e reconstrói a tabela a partir do arquivo "
+        "original. Gera nova versão de dados; o histórico é preservado.",
+        params_model=SetHeaderParams,
+        reversible=True,
+        touches_data=True,
+        apply=_set_header_row,
+        needs_original=True,
     ),
     "apply_mapping_template": OperationSpec(
         code="apply_mapping_template",

@@ -109,16 +109,30 @@ def _build_stream(
     sheet: str | None,
     limits: ImportLimits,
     warnings: list[str],
+    header_row: int | None = None,
 ) -> TableStream:
-    """Consome só as primeiras linhas para achar o cabeçalho; o resto é streaming."""
+    """Consome só as primeiras linhas para achar o cabeçalho; o resto é streaming.
+
+    `header_row` (número da linha na origem, 1-based) força a escolha manual do cabeçalho.
+    Sem ele, o cabeçalho é detectado automaticamente.
+    """
     head: list[tuple[int, list[str | None]]] = []
-    for item in raw:
-        head.append(item)
-        if len(head) >= _HEADER_SCAN:
-            break
-    if not head:
-        raise DomainError("Arquivo sem conteúdo.")
-    header_index = detect_header_index([[c or "" for c in values] for _, values in head])
+    if header_row is not None:
+        for item in raw:
+            head.append(item)
+            if item[0] >= header_row:
+                break
+        if not head or head[-1][0] != header_row:
+            raise DomainError(f"A linha {header_row} não existe nesta origem.")
+        header_index = len(head) - 1
+    else:
+        for item in raw:
+            head.append(item)
+            if len(head) >= _HEADER_SCAN:
+                break
+        if not head:
+            raise DomainError("Arquivo sem conteúdo.")
+        header_index = detect_header_index([[c or "" for c in values] for _, values in head])
     header_cells = [c or "" for c in head[header_index][1]]
     if len(header_cells) > limits.max_columns:
         raise DomainError(f"Tabela excede o limite de {limits.max_columns} colunas.")
@@ -163,7 +177,9 @@ def _decode_guarded(
 
 
 @contextmanager
-def open_csv(path: Path, limits: ImportLimits) -> Iterator[TableStream]:
+def open_csv(
+    path: Path, limits: ImportLimits, header_row: int | None = None
+) -> Iterator[TableStream]:
     encoding = _sniff_text_encoding(path)
     delimiter = _sniff_delimiter(path, encoding)
     with path.open("r", encoding=encoding, newline="") as fh:
@@ -171,7 +187,39 @@ def open_csv(path: Path, limits: ImportLimits) -> Iterator[TableStream]:
         raw = _decode_guarded(
             (number, cast(list[str | None], row)) for number, row in enumerate(reader, start=1)
         )
-        yield _build_stream(raw, sheet=None, limits=limits, warnings=[])
+        yield _build_stream(raw, sheet=None, limits=limits, warnings=[], header_row=header_row)
+
+
+def read_raw_head(
+    path: Path, kind: str, sheet: str | None, limits: ImportLimits, count: int
+) -> list[tuple[int, list[str | None]]]:
+    """Primeiras linhas brutas da origem (sem cabeçalho escolhido), para a seleção manual."""
+    if kind == "csv":
+        encoding = _sniff_text_encoding(path)
+        delimiter = _sniff_delimiter(path, encoding)
+        out: list[tuple[int, list[str | None]]] = []
+        with path.open("r", encoding=encoding, newline="") as fh:
+            for number, row in enumerate(csv.reader(fh, delimiter=delimiter), start=1):
+                if number > count:
+                    break
+                out.append((number, [clean_text(c) for c in row]))
+        return out
+    check_zip_file(path, limits)
+    with path.open("rb") as fh:
+        workbook = load_workbook(fh, read_only=True, data_only=True)
+        try:
+            names = [str(n) for n in workbook.sheetnames]
+            target = sheet if sheet is not None else (names[0] if names else None)
+            if target is None or target not in names:
+                raise DomainError("Aba da origem não encontrada.")
+            out_x: list[tuple[int, list[str | None]]] = []
+            for number, row in enumerate(workbook[target].iter_rows(values_only=True), start=1):
+                if number > count:
+                    break
+                out_x.append((number, [_cell_to_text(v)[0] for v in row]))
+            return out_x
+        finally:
+            workbook.close()
 
 
 def _cell_to_text(value: object) -> tuple[str, bool]:
@@ -201,7 +249,9 @@ def list_sheets_file(path: Path, limits: ImportLimits) -> list[str]:
 
 
 @contextmanager
-def open_xlsx(path: Path, sheet: str | None, limits: ImportLimits) -> Iterator[TableStream]:
+def open_xlsx(
+    path: Path, sheet: str | None, limits: ImportLimits, header_row: int | None = None
+) -> Iterator[TableStream]:
     check_zip_file(path, limits)
     with path.open("rb") as fh:
         workbook = load_workbook(fh, read_only=True, data_only=True)
@@ -227,7 +277,9 @@ def open_xlsx(path: Path, sheet: str | None, limits: ImportLimits) -> Iterator[T
                         cells.append(text)
                     yield number, cells
 
-            stream = _build_stream(raw(), sheet=target, limits=limits, warnings=warnings)
+            stream = _build_stream(
+                raw(), sheet=target, limits=limits, warnings=warnings, header_row=header_row
+            )
             body = stream.rows
 
             def rows_then_warn() -> Iterator[tuple[int, list[str | None]]]:

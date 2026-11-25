@@ -18,8 +18,10 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
@@ -42,6 +44,7 @@ from engiflow_api.infrastructure.models import (
     DatasetVersion,
     DatasetVersionRow,
 )
+from engiflow_api.infrastructure.readers import ImportLimits, open_csv, open_xlsx
 
 PREVIEW_TTL = timedelta(minutes=15)
 _INSERT_BATCH = 2_000
@@ -109,6 +112,54 @@ def load_snapshot(db: DbSession, state: State) -> Snapshot:
     )
 
 
+@dataclass(frozen=True)
+class OriginalSource:
+    """Pasta dos arquivos originais e limites de leitura. Só operações de reconstrução usam."""
+
+    directory: Path
+    limits: ImportLimits
+
+
+def _source_snapshot(
+    db: DbSession,
+    dataset: Dataset,
+    base: State,
+    spec: OperationSpec,
+    params: BaseModel,
+    source: OriginalSource | None,
+) -> Snapshot:
+    """Snapshot de entrada da operação.
+
+    Operações comuns partem da versão atual. Operações de reconstrução (cabeçalho) relêem o
+    arquivo original, que é imutável (nome = hash). O mapeamento atual é mantido aqui; a
+    operação decide o que continua válido.
+    """
+    if not spec.needs_original:
+        return load_snapshot(db, base)
+    if source is None:
+        raise DomainError("Arquivo original indisponível para esta operação.")
+    path = source.directory / f"{dataset.source_sha256}.{dataset.file_kind}"
+    if not path.exists():
+        raise DomainError("Arquivo original não encontrado. A tabela não pode ser reconstruída.")
+    header_row: int = params.model_dump()["header_row"]
+    mapping = dict(metadata_of(db, base.metadata_version_id).mapping or {})
+    ctx = (
+        open_csv(path, source.limits, header_row=header_row)
+        if dataset.file_kind == "csv"
+        else open_xlsx(path, dataset.sheet_name, source.limits, header_row=header_row)
+    )
+    with ctx as stream:
+        rows = list(stream.rows)
+        columns = list(stream.columns)
+    return Snapshot(
+        columns=columns,
+        rows=[list(values) for _, values in rows],
+        row_numbers=[number for number, _ in rows],
+        mapping=mapping,
+        header_row=header_row,
+    )
+
+
 def _resolve_base(
     dataset: Dataset, base_version_id: str, base_metadata_version_id: str | None
 ) -> State:
@@ -143,13 +194,14 @@ def create_preview(
     raw_params: dict[str, Any],
     base_version_id: str,
     base_metadata_version_id: str | None = None,
+    source: OriginalSource | None = None,
     actor: str,
     correlation_id: str | None,
 ) -> DatasetPreview:
     base = _resolve_base(dataset, base_version_id, base_metadata_version_id)
     spec: OperationSpec = get_operation(code)
     params = validate_params(spec, raw_params)
-    snapshot = load_snapshot(db, base)
+    snapshot = _source_snapshot(db, dataset, base, spec, params, source)
     result: OperationResult = spec.apply(snapshot, params)
     rows_hash = (
         rows_sha256(result.snapshot.rows) if spec.touches_data else current_data_hash(db, base)
@@ -326,6 +378,7 @@ def apply_preview(
     preview_id: str,
     base_version_id: str,
     base_metadata_version_id: str | None = None,
+    source: OriginalSource | None = None,
     idempotency_key: str | None,
     actor: str,
     correlation_id: str | None,
@@ -380,7 +433,7 @@ def apply_preview(
     if spec.version != preview.code_version:
         raise ConflictError("Versão da operação mudou desde a prévia. Gere uma nova prévia.")
     params = validate_params(spec, preview.params)
-    snapshot = load_snapshot(db, base)
+    snapshot = _source_snapshot(db, dataset, base, spec, params, source)
     result = spec.apply(snapshot, params)
     meta_hash = metadata_sha256(
         result.snapshot.columns, result.snapshot.mapping, result.snapshot.header_row

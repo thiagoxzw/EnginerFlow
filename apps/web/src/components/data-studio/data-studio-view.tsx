@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError } from "@/lib/api";
+import { HeaderSection } from "@/components/data-studio/header-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
   CANONICAL_FIELDS,
@@ -220,6 +221,8 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
         initial={data.mapping}
         onSaved={onSaved}
       />
+
+      <HeaderSection datasetId={datasetId} />
 
       <TemplatesSection
         datasetId={datasetId}

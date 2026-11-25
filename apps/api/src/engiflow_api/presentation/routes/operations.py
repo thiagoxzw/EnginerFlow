@@ -7,18 +7,56 @@ aceitam `Idempotency-Key`. Erros de concorrência retornam 409.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, Request, Response
+from fastapi import APIRouter, Header, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from engiflow_api.application import versioning
 from engiflow_api.application.data_studio import get_dataset
 from engiflow_api.application.operations.registry import OPERATIONS
+from engiflow_api.application.versioning import OriginalSource
+from engiflow_api.core.config import get_settings
+from engiflow_api.domain.errors import DomainError
 from engiflow_api.infrastructure.models import DatasetOperation, DatasetPreview
+from engiflow_api.infrastructure.readers import ImportLimits, read_raw_head
 from engiflow_api.presentation.deps import CurrentUser, DbDep
 
 router = APIRouter(prefix="/api/v1", tags=["transformacoes"])
+
+
+def _original_source() -> OriginalSource:
+    """Pasta de originais e limites da configuração atual (mesmos da importação)."""
+    cfg = get_settings()
+    return OriginalSource(
+        directory=Path(cfg.data_dir) / "originals",
+        limits=ImportLimits(
+            max_upload_bytes=cfg.max_upload_mb * 1024 * 1024, max_rows=cfg.max_rows
+        ),
+    )
+
+
+class RawRowOut(BaseModel):
+    row_number: int
+    values: list[str | None]
+
+
+@router.get("/datasets/{dataset_id}/raw-head", response_model=list[RawRowOut])
+def raw_head(
+    dataset_id: str,
+    user: CurrentUser,
+    db: DbDep,
+    count: Annotated[int, Query(ge=1, le=60)] = 30,
+) -> list[RawRowOut]:
+    """Primeiras linhas brutas do arquivo original, para escolher o cabeçalho."""
+    dataset = get_dataset(db, dataset_id)
+    source = _original_source()
+    path = source.directory / f"{dataset.source_sha256}.{dataset.file_kind}"
+    if not path.exists():
+        raise DomainError("Arquivo original não encontrado.")
+    rows = read_raw_head(path, dataset.file_kind, dataset.sheet_name, source.limits, count)
+    return [RawRowOut(row_number=n, values=v) for n, v in rows]
 
 
 class CatalogItem(BaseModel):
@@ -194,6 +232,7 @@ def preview(
         raw_params=payload.params,
         base_version_id=payload.base_version_id,
         base_metadata_version_id=payload.base_metadata_version_id,
+        source=_original_source(),
         actor=user.email,
         correlation_id=_correlation(request),
     )
@@ -226,6 +265,7 @@ def apply(
         preview_id=payload.preview_id,
         base_version_id=payload.base_version_id,
         base_metadata_version_id=payload.base_metadata_version_id,
+        source=_original_source(),
         idempotency_key=idempotency_key,
         actor=user.email,
         correlation_id=_correlation(request),
