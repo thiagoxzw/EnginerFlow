@@ -208,6 +208,59 @@ def _set_rows_value(snapshot: Snapshot, params: SetRowsValueParams) -> Operation
     )
 
 
+MAX_CELLS_PER_OPERATION = 5_000
+
+
+class CellAssignment(_Strict):
+    row_number: int = Field(ge=1)
+    column: str = Field(min_length=1, max_length=255)
+    value: str | None = None
+
+
+class SetCellsParams(_Strict):
+    """Várias células numa operação só (colagem). Uma entrada no histórico, desfeita de uma vez."""
+
+    cells: list[CellAssignment] = Field(min_length=1, max_length=MAX_CELLS_PER_OPERATION)
+
+
+def _set_cells(snapshot: Snapshot, params: SetCellsParams) -> OperationResult:
+    indexes = {name: _column_index(snapshot, name) for name in {c.column for c in params.cells}}
+    by_row: dict[int, dict[int, str | None]] = {}
+    for cell in params.cells:
+        by_row.setdefault(cell.row_number, {})[indexes[cell.column]] = cell.value
+    present = set(snapshot.row_numbers)
+    missing = sorted(set(by_row) - present)
+    if missing:
+        raise DomainError(
+            f"Linhas inexistentes na versão atual: {', '.join(str(n) for n in missing[:10])}."
+        )
+    rows: list[list[str | None]] = []
+    cells_changed = 0
+    affected: set[int] = set()
+    for number, row in zip(snapshot.row_numbers, snapshot.rows, strict=True):
+        changes = by_row.get(number)
+        if not changes:
+            rows.append(row)
+            continue
+        new_row = list(row)
+        changed = False
+        for index, value in changes.items():
+            if new_row[index] != value:
+                new_row[index] = value
+                cells_changed += 1
+                changed = True
+        if changed:
+            affected.add(number)
+            rows.append(new_row)
+        else:
+            rows.append(row)
+    return OperationResult(
+        snapshot=_with(snapshot, rows=rows),
+        rows_affected=len(affected),
+        cells_changed=cells_changed,
+    )
+
+
 class ApplyTemplateParams(_Strict):
     template_id: str = Field(min_length=1, max_length=36)
     definition_version: int = Field(ge=1)
@@ -392,6 +445,15 @@ OPERATIONS: dict[str, OperationSpec] = {
         reversible=True,
         touches_data=True,
         apply=_set_rows_value,
+    ),
+    "set_cells": OperationSpec(
+        code="set_cells",
+        version=1,
+        description="Define valores em várias células (colagem). Uma única operação no histórico.",
+        params_model=SetCellsParams,
+        reversible=True,
+        touches_data=True,
+        apply=_set_cells,
     ),
 }
 

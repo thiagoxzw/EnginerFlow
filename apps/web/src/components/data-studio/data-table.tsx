@@ -1,10 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type ClipboardEvent } from "react";
 
+import { EditableCell, commitCells } from "@/components/data-studio/cell-editor";
 import { RowActions } from "@/components/data-studio/row-actions";
 import { errorText } from "@/components/data-studio/templates-section";
+import { copyText, parseTsv, planPaste, type CellTarget, type PasteCell, type PastePlan } from "@/lib/clipboard";
+import { invalidateDataset } from "@/lib/invalidate";
 import {
   NUMERIC_OPS,
   OP_LABELS,
@@ -20,26 +23,11 @@ const inputClass = "rounded-md border border-[var(--color-border)] bg-transparen
 const buttonClass =
   "rounded-md border border-[var(--color-border)] px-2 py-1 text-sm hover:bg-[var(--color-border)] disabled:opacity-50";
 const PAGE_SIZES = [25, 50, 100];
+/** Colagens com mais células que isto pedem confirmação explícita antes de gravar. */
+const CONFIRM_PASTE_ABOVE = 20;
 const OPS = Object.keys(OP_LABELS) as FilterOp[];
 
-/** Mostra os três estados de célula de forma distinta, sem alterar o valor. */
-export function CellValue({ value }: { value: string | null }) {
-  if (value === null) {
-    return (
-      <span className="italic text-[var(--color-muted)]" title="Desconhecido">
-        ∅ desconhecido
-      </span>
-    );
-  }
-  if (value === "") {
-    return (
-      <span className="text-[var(--color-muted)]" title="Vazio">
-        (vazio)
-      </span>
-    );
-  }
-  return <span className="font-mono">{value}</span>;
-}
+export { CellValue } from "@/components/data-studio/cell-value";
 
 export function DataTable({ datasetId, columns }: { datasetId: string; columns: string[] }) {
   const [q, setQ] = useState("");
@@ -53,6 +41,73 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const [selectMessage, setSelectMessage] = useState<string | null>(null);
   // Confirmação de ações em linhas: fica visível mesmo depois que a seleção é limpa.
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  // Colagem: mensagens de validação e confirmação para colagens grandes.
+  const queryClient = useQueryClient();
+  const [pasteMessage, setPasteMessage] = useState<string | null>(null);
+  const [pendingPaste, setPendingPaste] = useState<(PastePlan & { ok: true }) | null>(null);
+  const [pasting, setPasting] = useState(false);
+
+  /** Célula de origem do evento de copiar/colar, com o valor exibido. Null fora das células. */
+  function focusedCell(target: EventTarget | null): (CellTarget & { value: string | null }) | null {
+    if (!(target instanceof HTMLElement)) return null;
+    const cell = target.closest<HTMLElement>('td[data-cell="1"]');
+    if (!cell) return null;
+    const rowIndex = Number(cell.dataset.rowIndex);
+    const colIndex = Number(cell.dataset.colIndex);
+    const row = rows.data?.rows[rowIndex];
+    if (!row) return null;
+    return { rowNumber: row.row_number, rowIndex, colIndex, value: row.values[colIndex] ?? null };
+  }
+
+  function onCopy(event: ClipboardEvent<HTMLTableElement>) {
+    if (event.target instanceof HTMLInputElement) return; // edição de célula usa o copiar do campo
+    const focus = focusedCell(event.target);
+    if (!focus) return;
+    const selectedValues = (rows.data?.rows ?? [])
+      .filter((r) => selected.has(r.row_number))
+      .map((r) => r.values);
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", copyText(focus.value, selectedValues));
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLTableElement>) {
+    if (event.target instanceof HTMLInputElement) return;
+    const focus = focusedCell(event.target);
+    if (!focus) return;
+    event.preventDefault();
+    const plan = planPaste(
+      parseTsv(event.clipboardData.getData("text/plain")),
+      focus,
+      columns,
+      (rows.data?.rows ?? []).map((r) => r.row_number),
+    );
+    setPasteMessage(null);
+    if (!plan.ok) {
+      setPasteMessage(plan.reason); // recusa antes de qualquer alteração
+      return;
+    }
+    // Colagens grandes pedem confirmação explícita; as pequenas são aplicadas e desfeitas pelo histórico.
+    if (plan.cells.length > CONFIRM_PASTE_ABOVE) {
+      setPendingPaste(plan);
+      return;
+    }
+    void applyPaste(plan.cells);
+  }
+
+  async function applyPaste(cells: PasteCell[]) {
+    setPasting(true);
+    setPasteMessage(null);
+    try {
+      await commitCells(datasetId, cells);
+      await invalidateDataset(queryClient, datasetId);
+      setActionMessage(`${cells.length} célula(s) coladas. Uma única operação: desfazer reverte tudo.`);
+    } catch (error) {
+      setPasteMessage(errorText(error));
+    } finally {
+      setPasting(false);
+      setPendingPaste(null);
+    }
+  }
 
   const query: RowsQuery = {
     offset,
@@ -218,7 +273,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
       ) : null}
 
       <div className="max-h-[32rem] overflow-auto rounded-md border border-[var(--color-border)]">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" onCopy={onCopy} onPaste={onPaste}>
           <thead className="sticky top-0 bg-[var(--color-surface)] text-left text-[var(--color-muted)]">
             <tr>
               <th className="px-2 py-1 font-medium">
@@ -252,7 +307,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
             </tr>
           </thead>
           <tbody>
-            {(rows.data?.rows ?? []).map((row) => (
+            {(rows.data?.rows ?? []).map((row, rowIndex) => (
               <tr key={row.row_number} className="border-t border-[var(--color-border)]">
                 <td className="px-2 py-1">
                   <input
@@ -272,9 +327,15 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                 </td>
                 <td className="px-2 py-1 text-[var(--color-muted)]">{row.row_number}</td>
                 {row.values.map((value, i) => (
-                  <td key={i} className="px-2 py-1 text-xs">
-                    <CellValue value={value} />
-                  </td>
+                  <EditableCell
+                    key={i}
+                    datasetId={datasetId}
+                    rowNumber={row.row_number}
+                    rowIndex={rowIndex}
+                    colIndex={i}
+                    column={columns[i] ?? ""}
+                    value={value}
+                  />
                 ))}
               </tr>
             ))}
@@ -337,6 +398,32 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
           </span>
         ) : null}
       </div>
+
+      {pasteMessage ? (
+        <p role="alert" className="text-sm text-[var(--color-danger)]">
+          {pasteMessage}
+        </p>
+      ) : null}
+
+      {pendingPaste ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+          <span>
+            Colar {pendingPaste.cells.length} célula(s) em {pendingPaste.rows} linha(s)? Uma única operação; o
+            desfazer reverte tudo.
+          </span>
+          <button
+            type="button"
+            onClick={() => void applyPaste(pendingPaste.cells)}
+            disabled={pasting}
+            className={buttonClass}
+          >
+            Confirmar colagem
+          </button>
+          <button type="button" onClick={() => setPendingPaste(null)} disabled={pasting} className={buttonClass}>
+            Cancelar
+          </button>
+        </div>
+      ) : null}
 
       {actionMessage ? (
         <p role="status" className="text-sm text-[var(--color-muted)]">

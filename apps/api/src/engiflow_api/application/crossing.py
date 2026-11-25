@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 from engiflow_api.application.audit import record_event
 from engiflow_api.domain import aggregate as ag
 from engiflow_api.domain import comparison as cmp_mod
+from engiflow_api.domain import formula as fm
 from engiflow_api.domain import join as jn
 from engiflow_api.domain import lookup as lk
 from engiflow_api.domain.canonical import metadata_sha256, rows_sha256
@@ -653,6 +654,84 @@ def create_derived_comparison(
         counts=dict(result.counts),
         columns=result.columns,
         rows=result.rows,
+        actor=actor,
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
+    )
+
+
+FORMULA_OPERATION_VERSION = 1
+
+
+@dataclass(frozen=True)
+class FormulaSpec:
+    formula: str
+    new_column: str
+
+
+def _formula_plan(dataset: Dataset, spec: FormulaSpec) -> fm.Formula:
+    columns = list(dataset.columns)
+    name = spec.new_column.strip()
+    if not name or len(name) > 255:
+        raise DomainError("Informe o nome da nova coluna (até 255 caracteres).")
+    if name.casefold() in {c.casefold() for c in columns}:
+        raise DomainError(f"Já existe uma coluna chamada '{name}'.")
+    try:
+        return fm.compile_formula(spec.formula, columns)
+    except fm.FormulaError as exc:
+        raise DomainError(str(exc)) from exc
+
+
+def run_formula(
+    db: DbSession, dataset: Dataset, spec: FormulaSpec
+) -> tuple[list[str], list[list[str | None]], dict[str, Any]]:
+    """Calcula a fórmula em cada linha da versão atual. Erros ficam explícitos na célula."""
+    formula = _formula_plan(dataset, spec)
+    columns = [*dataset.columns, spec.new_column.strip()]
+    names = list(dataset.columns)
+    rows: list[list[str | None]] = []
+    errors = 0
+    read = 0
+    for _, values in _stream_current(db, dataset):
+        read += 1
+        text = fm.evaluate_row(formula, dict(zip(names, values, strict=True)))
+        if fm.is_error_text(text):
+            errors += 1
+        rows.append([*values, text])
+    return columns, rows, {"linhas_lidas": read, "erros": errors}
+
+
+def create_derived_formula(
+    db: DbSession,
+    dataset: Dataset,
+    spec: FormulaSpec,
+    *,
+    actor: str,
+    correlation_id: str | None,
+    idempotency_key: str | None = None,
+) -> DerivedOutcome:
+    _formula_plan(dataset, spec)  # valida antes de qualquer leitura de linhas
+    params: dict[str, Any] = {
+        "dataset_id": dataset.id,
+        "formula": spec.formula,
+        "nova_coluna": spec.new_column.strip(),
+        "policy": {"operation": "formula", "erros_na_celula": "explícitos (#VAZIO!, #DIV/0!...)"},
+    }
+    replayed = replay_derived(db, idempotency_key, "formula", params)
+    if replayed is not None:
+        return replayed
+    columns, rows, counts = run_formula(db, dataset, spec)
+    return store_derived(
+        db,
+        dataset,
+        None,
+        kind="formula",
+        operation_version=FORMULA_OPERATION_VERSION,
+        label="Fórmula",
+        params=params,
+        counts=counts,
+        columns=columns,
+        rows=rows,
         actor=actor,
         correlation_id=correlation_id,
         idempotency_key=idempotency_key,

@@ -22,13 +22,16 @@ from engiflow_api.application.crossing import (
     AggregateSpec,
     ComparisonSpec,
     DerivedOutcome,
+    FormulaSpec,
     LookupSpec,
     create_derived_aggregate,
     create_derived_comparison,
+    create_derived_formula,
     create_derived_join,
     create_derived_lookup,
     run_aggregate,
     run_comparison,
+    run_formula,
     run_join,
     run_lookup,
 )
@@ -374,6 +377,51 @@ def compare_derive(
             get_dataset(db, payload.left_id),
             get_dataset(db, payload.right_id),
             _compare_spec(payload),
+            actor=user.email,
+            correlation_id=_correlation(request),
+            idempotency_key=idempotency_key,
+        )
+
+    return _derive(db, make)
+
+
+class FormulaIn(BaseModel):
+    dataset_id: str = Field(min_length=1, max_length=36)
+    formula: str = Field(min_length=1, max_length=2000)
+    new_column: str = Field(min_length=1, max_length=255)
+
+
+class FormulaPreviewOut(BaseModel):
+    columns: list[str]
+    rows: list[list[str | None]]
+    counts: dict[str, int]
+
+
+def _formula_spec(payload: FormulaIn) -> FormulaSpec:
+    return FormulaSpec(formula=payload.formula, new_column=payload.new_column)
+
+
+@router.post("/formula/preview", response_model=FormulaPreviewOut)
+def formula_preview(payload: FormulaIn, user: CurrentUser, db: DbDep) -> FormulaPreviewOut:
+    """Primeiras linhas com a coluna calculada, e contagem de erros. Não grava nada."""
+    dataset = get_dataset(db, payload.dataset_id)
+    columns, rows, counts = run_formula(db, dataset, _formula_spec(payload))
+    return FormulaPreviewOut(columns=columns, rows=rows[:50], counts=dict(counts))
+
+
+@router.post("/formula/derive", response_model=DerivedOut, status_code=201)
+def formula_derive(
+    payload: FormulaIn,
+    request: Request,
+    user: CurrentUser,
+    db: DbDep,
+    idempotency_key: IdempotencyKey = None,
+) -> DerivedOut:
+    def make() -> DerivedOutcome:
+        return create_derived_formula(
+            db,
+            get_dataset(db, payload.dataset_id),
+            _formula_spec(payload),
             actor=user.email,
             correlation_id=_correlation(request),
             idempotency_key=idempotency_key,

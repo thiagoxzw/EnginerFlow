@@ -334,6 +334,7 @@ _OPERATION_NAMES = {
     "join": "Junção",
     "aggregate": "Agregação",
     "compare": "Comparação por chave",
+    "formula": "Fórmula",
 }
 
 

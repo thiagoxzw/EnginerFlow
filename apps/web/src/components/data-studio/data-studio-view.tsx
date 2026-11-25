@@ -15,6 +15,7 @@ import {
 } from "@/components/data-studio/table-admin";
 import { CrossLookupSection } from "@/components/data-studio/cross-lookup-section";
 import { AggregateSection } from "@/components/data-studio/aggregate-section";
+import { FormulaSection } from "@/components/data-studio/formula-section";
 import { JoinSection } from "@/components/data-studio/join-section";
 import { LineagePanel } from "@/components/data-studio/lineage-panel";
 import { KeyCompareSection } from "@/components/data-studio/key-compare-section";
@@ -262,6 +263,11 @@ function DatasetPanel({
             id: "transformar",
             label: "Transformar",
             content: <ReplaceSection datasetId={datasetId} columns={data.columns} />,
+          },
+          {
+            id: "formulas",
+            label: "Fórmulas",
+            content: <FormulaSection datasetId={datasetId} columns={data.columns} onDerived={onOpen} />,
           },
           {
             id: "cruzar",
