@@ -40,6 +40,8 @@ export function BomView() {
     queryKey: ["bom-lines", revisionId],
     queryFn: () => getBomLines(revisionId as string),
     enabled: Boolean(revisionId),
+    // Mantém a árvore montada enquanto a nova revisão carrega (senão o painel perde o estado).
+    placeholderData: (previous) => previous,
   });
   const data = lines.data?.lines ?? [];
   const current = structure?.revisions.find((r) => r.id === revisionId);
