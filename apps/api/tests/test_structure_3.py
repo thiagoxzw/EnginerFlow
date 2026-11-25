@@ -36,7 +36,8 @@ def _run(code: str, raw: dict[str, object], snapshot: Snapshot | None = None):  
 
 def test_insert_rows_after_a_row_creates_empty_rows_with_new_numbers() -> None:
     result = _run("insert_rows", {"after_row_number": 3, "count": 2})
-    assert result.snapshot.row_numbers == [2, 3, 5, 6, 4]
+    # Renumeração na ordem exibida (como em planilha): a leitura ordena por número.
+    assert result.snapshot.row_numbers == [2, 3, 4, 5, 6]
     assert result.snapshot.rows[2] == ["", "", ""]
     assert result.snapshot.rows[3] == ["", "", ""]
     assert result.rows_affected == 2
@@ -45,7 +46,8 @@ def test_insert_rows_after_a_row_creates_empty_rows_with_new_numbers() -> None:
 
 def test_insert_rows_at_top_and_keeps_existing_values() -> None:
     result = _run("insert_rows", {"after_row_number": 0, "count": 1})
-    assert result.snapshot.row_numbers == [5, 2, 3, 4]
+    assert result.snapshot.row_numbers == [2, 3, 4, 5]
+    assert result.snapshot.rows[0] == ["", "", ""]
     assert result.snapshot.rows[1] == ["00123", "parafuso M8", "1"]
 
 
@@ -56,7 +58,7 @@ def test_insert_rows_rejects_unknown_reference_row() -> None:
 
 def test_duplicate_rows_places_copy_below_and_keeps_unknown_values() -> None:
     result = _run("duplicate_rows", {"row_numbers": [3]})
-    assert result.snapshot.row_numbers == [2, 3, 5, 4]
+    assert result.snapshot.row_numbers == [2, 3, 4, 5]
     assert result.snapshot.rows[1] == result.snapshot.rows[2]
     # Desconhecido (None) continua desconhecido na cópia, não vira vazio.
     assert result.snapshot.rows[2][2] is None

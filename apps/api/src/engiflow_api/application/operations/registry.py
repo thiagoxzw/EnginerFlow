@@ -374,8 +374,17 @@ class InsertRowsParams(_Strict):
     count: int = Field(ge=1, le=MAX_NEW_ROWS)
 
 
-def _next_row_number(snapshot: Snapshot) -> int:
-    return max(snapshot.row_numbers, default=0) + 1
+def _consecutive(count: int, base: int) -> list[int]:
+    """Números consecutivos a partir de `base`, na ordem exibida.
+
+    A versão guarda só o número de cada linha, e a leitura ordena por ele. Por isso, ao inserir
+    ou duplicar, as linhas são renumeradas na ordem exibida, como em uma planilha.
+    """
+    return list(range(base, base + count))
+
+
+def _base_number(snapshot: Snapshot) -> int:
+    return min(snapshot.row_numbers, default=2)
 
 
 def _insert_rows(snapshot: Snapshot, params: InsertRowsParams) -> OperationResult:
@@ -383,20 +392,15 @@ def _insert_rows(snapshot: Snapshot, params: InsertRowsParams) -> OperationResul
     if params.after_row_number and params.after_row_number not in snapshot.row_numbers:
         raise DomainError(f"Linha {params.after_row_number} não existe nesta versão.")
     width = len(snapshot.columns)
-    first = _next_row_number(snapshot)
-    fresh_numbers = list(range(first, first + params.count))
-    fresh_rows: list[list[str | None]] = [[""] * width for _ in fresh_numbers]
+    fresh_rows: list[list[str | None]] = [[""] * width for _ in range(params.count)]
     rows: list[list[str | None]] = []
-    numbers: list[int] = []
     if params.after_row_number == 0:
         rows.extend(fresh_rows)
-        numbers.extend(fresh_numbers)
     for number, row in zip(snapshot.row_numbers, snapshot.rows, strict=True):
         rows.append(row)
-        numbers.append(number)
         if number == params.after_row_number:
             rows.extend(fresh_rows)
-            numbers.extend(fresh_numbers)
+    numbers = _consecutive(len(rows), _base_number(snapshot))
     return OperationResult(
         snapshot=_with(snapshot, rows=rows, row_numbers=numbers),
         rows_affected=params.count,
@@ -417,16 +421,12 @@ def _duplicate_rows(snapshot: Snapshot, params: DuplicateRowsParams) -> Operatio
         raise DomainError(
             f"Linhas inexistentes na versão atual: {', '.join(str(n) for n in missing[:10])}."
         )
-    next_number = _next_row_number(snapshot)
     rows: list[list[str | None]] = []
-    numbers: list[int] = []
     for number, row in zip(snapshot.row_numbers, snapshot.rows, strict=True):
         rows.append(row)
-        numbers.append(number)
         if number in selected:
             rows.append(list(row))
-            numbers.append(next_number)
-            next_number += 1
+    numbers = _consecutive(len(rows), _base_number(snapshot))
     return OperationResult(
         snapshot=_with(snapshot, rows=rows, row_numbers=numbers),
         rows_affected=len(present),
