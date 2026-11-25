@@ -31,15 +31,21 @@ from engiflow_api.application.table_query import matching_row_numbers, query_pag
 from engiflow_api.core.config import get_settings
 from engiflow_api.domain.errors import DomainError
 from engiflow_api.domain.query import MAX_SEARCH, FilterIn, TableQuery
-from engiflow_api.domain.tabular import CodeComparison
+from engiflow_api.domain.tabular import CodeComparison, detect_header_index
 from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
 from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
-from engiflow_api.infrastructure.readers import ImportLimits
+from engiflow_api.infrastructure.readers import (
+    ImportLimits,
+    detect_kind_file,
+    list_sheets_file,
+    read_raw_head,
+)
 from engiflow_api.presentation.deps import CurrentUser, DbDep
 
 router = APIRouter(prefix="/api/v1/datasets", tags=["data-studio"])
 
 _PREVIEW_ROWS = 20
+_INSPECT_ROWS = 15
 _CHUNK = 1024 * 1024
 _EXPORT_MEDIA = {
     "csv": "text/csv; charset=utf-8",
@@ -587,3 +593,85 @@ def export_compare(
         unified += [["candidato_zeros", c[0], c[1]] for c in candidates]
         content = to_csv_bytes(["tipo", "codigo_a", "codigo_b"], unified)
     return _download(content, fmt, f"comparacao_{left.name}_x_{right.name}")
+
+
+class RawRowOut(BaseModel):
+    row_number: int
+    values: list[str | None]
+
+
+class InspectOut(BaseModel):
+    kind: str
+    sheets: list[str]
+    sheet: str | None
+    header_row: int | None
+    columns: list[str]
+    preview: list[RawRowOut]
+    warnings: list[str]
+
+
+@router.post("/inspect", response_model=InspectOut)
+def inspect_upload(
+    file: UploadFile,
+    user: CurrentUser,
+    sheet: Annotated[str | None, Form()] = None,
+) -> InspectOut:
+    """Lê o arquivo sem importar: abas, cabeçalho detectado e prévia. Nada é gravado no banco.
+
+    O arquivo é gravado num temporário da pasta de armazenamento e removido ao final.
+    """
+    settings = get_settings()
+    limits = ImportLimits(
+        max_upload_bytes=settings.max_upload_mb * 1024 * 1024, max_rows=settings.max_rows
+    )
+    storage = Path(settings.data_dir) / "originals"
+    storage.mkdir(parents=True, exist_ok=True)
+    sweep_stale_temp_files(storage)
+    temp_path = storage / f".tmp-inspect-{uuid.uuid4().hex}"
+    size = 0
+    try:
+        with temp_path.open("wb") as out:
+            while chunk := file.file.read(_CHUNK):
+                size += len(chunk)
+                if size > limits.max_upload_bytes:
+                    raise DomainError(f"Arquivo excede o limite de {settings.max_upload_mb} MB.")
+                out.write(chunk)
+        if size == 0:
+            raise DomainError("Arquivo vazio.")
+        kind = detect_kind_file(temp_path)
+        sheets: list[str] = []
+        chosen: str | None = None
+        if kind == "xlsx":
+            sheets = list_sheets_file(temp_path, limits)
+            if not sheets:
+                raise DomainError("Planilha sem abas.")
+            chosen = sheet or sheets[0]
+            if chosen not in sheets:
+                raise DomainError(f"Aba '{chosen}' não existe. Abas: {', '.join(sheets)}.")
+        raw = read_raw_head(temp_path, kind, chosen, limits, _INSPECT_ROWS)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    warnings: list[str] = []
+    header_row: int | None = None
+    columns: list[str] = []
+    if raw:
+        header_index = detect_header_index([[c or "" for c in values] for _, values in raw])
+        header_row = raw[header_index][0]
+        columns = [c or "" for c in raw[header_index][1]]
+        names = [c.strip().casefold() for c in columns if c and c.strip()]
+        if len(names) != len(set(names)):
+            warnings.append("Há nomes de coluna repetidos; eles receberão sufixos ao importar.")
+        if any(not c.strip() for c in columns):
+            warnings.append("Há colunas sem nome no cabeçalho detectado.")
+    else:
+        warnings.append("A aba está vazia.")
+    return InspectOut(
+        kind=kind,
+        sheets=sheets,
+        sheet=chosen,
+        header_row=header_row,
+        columns=columns,
+        preview=[RawRowOut(row_number=n, values=v) for n, v in raw],
+        warnings=warnings,
+    )
