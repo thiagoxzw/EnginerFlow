@@ -15,6 +15,7 @@ import {
 import { CrossLookupSection } from "@/components/data-studio/cross-lookup-section";
 import { AggregateSection } from "@/components/data-studio/aggregate-section";
 import { JoinSection } from "@/components/data-studio/join-section";
+import { KeyCompareSection } from "@/components/data-studio/key-compare-section";
 import { UploadSection } from "@/components/data-studio/upload-section";
 import { ReplaceSection } from "@/components/data-studio/replace-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
@@ -294,6 +295,18 @@ function DatasetPanel({
         <summary className="cursor-pointer font-medium">Agrupar e agregar (somas, contagens)</summary>
         <div className="pt-3">
           <AggregateSection datasetId={datasetId} columns={data.columns} onDerived={onOpen} />
+        </div>
+      </details>
+
+      <details className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Comparar linhas por chave (avançado)</summary>
+        <div className="pt-3">
+          <KeyCompareSection
+            leftId={datasetId}
+            leftColumns={data.columns}
+            datasets={allDatasets.data ?? []}
+            onDerived={onOpen}
+          />
         </div>
       </details>
 

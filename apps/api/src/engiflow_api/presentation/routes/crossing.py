@@ -15,11 +15,14 @@ from pydantic import BaseModel, Field
 
 from engiflow_api.application.crossing import (
     AggregateSpec,
+    ComparisonSpec,
     LookupSpec,
     create_derived_aggregate,
+    create_derived_comparison,
     create_derived_join,
     create_derived_lookup,
     run_aggregate,
+    run_comparison,
     run_join,
     run_lookup,
 )
@@ -271,6 +274,63 @@ def aggregate_derive(
         db,
         dataset,
         _aggregate_spec(payload),
+        actor=user.email,
+        correlation_id=_correlation(request),
+    )
+    db.commit()
+    return DerivedOut(
+        dataset_id=outcome.dataset.id,
+        name=outcome.dataset.name,
+        run_id=outcome.run.id,
+        row_count=outcome.row_count,
+        counts={k: v for k, v in outcome.counts.items()},
+        result_sha256=outcome.run.result_sha256,
+    )
+
+
+class CompareIn(BaseModel):
+    left_id: str = Field(min_length=1, max_length=36)
+    right_id: str = Field(min_length=1, max_length=36)
+    left_keys: list[str] = Field(min_length=1, max_length=10)
+    right_keys: list[str] = Field(min_length=1, max_length=10)
+
+
+class CompareOut(BaseModel):
+    columns: list[str]
+    counts: dict[str, int]
+    sample: list[list[str | None]]
+    difference_rows: int
+
+
+def _compare_spec(payload: CompareIn) -> ComparisonSpec:
+    return ComparisonSpec(left_keys=tuple(payload.left_keys), right_keys=tuple(payload.right_keys))
+
+
+@router.post("/compare/preview", response_model=CompareOut)
+def compare_preview(payload: CompareIn, user: CurrentUser, db: DbDep) -> CompareOut:
+    """Adicionados, removidos, alterados (por coluna) e idênticos. Não grava nada."""
+    left = get_dataset(db, payload.left_id)
+    right = get_dataset(db, payload.right_id)
+    result = run_comparison(db, left, right, _compare_spec(payload))
+    return CompareOut(
+        columns=result.columns,
+        counts=dict(result.counts),
+        sample=result.sample,
+        difference_rows=len(result.rows),
+    )
+
+
+@router.post("/compare/derive", response_model=DerivedOut, status_code=201)
+def compare_derive(
+    payload: CompareIn, request: Request, user: CurrentUser, db: DbDep
+) -> DerivedOut:
+    left = get_dataset(db, payload.left_id)
+    right = get_dataset(db, payload.right_id)
+    outcome = create_derived_comparison(
+        db,
+        left,
+        right,
+        _compare_spec(payload),
         actor=user.email,
         correlation_id=_correlation(request),
     )

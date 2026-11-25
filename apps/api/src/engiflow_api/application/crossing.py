@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.application.audit import record_event
 from engiflow_api.domain import aggregate as ag
+from engiflow_api.domain import comparison as cmp_mod
 from engiflow_api.domain import join as jn
 from engiflow_api.domain import lookup as lk
 from engiflow_api.domain.canonical import metadata_sha256, rows_sha256
@@ -497,6 +498,82 @@ def create_derived_aggregate(
         label="Agregação",
         params=params,
         counts=counts,
+        columns=result.columns,
+        rows=result.rows,
+        actor=actor,
+        correlation_id=correlation_id,
+    )
+
+
+COMPARISON_OPERATION_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ComparisonSpec:
+    left_keys: tuple[str, ...]
+    right_keys: tuple[str, ...]
+
+
+def _shared_columns(
+    left_cols: list[str], right_cols: list[str], left_key: list[int], right_key: list[int]
+) -> list[tuple[int, int, str]]:
+    """Colunas com o mesmo nome (sem diferenciar maiúsculas) que não são chave."""
+    right_map = {c.casefold(): j for j, c in enumerate(right_cols)}
+    out: list[tuple[int, int, str]] = []
+    for i, name in enumerate(left_cols):
+        if i in left_key:
+            continue
+        j = right_map.get(name.casefold())
+        if j is None or j in right_key:
+            continue
+        out.append((i, j, name))
+    return out
+
+
+def run_comparison(
+    db: DbSession, left: Dataset, right: Dataset, spec: ComparisonSpec
+) -> cmp_mod.ComparisonResult:
+    left_cols = list(left.columns)
+    right_cols = list(right.columns)
+    left_key = _indexes(left_cols, spec.left_keys, "a tabela de origem")
+    right_key = _indexes(right_cols, spec.right_keys, "a tabela de comparação")
+    if len(left_key) != len(right_key):
+        raise DomainError("As chaves das duas tabelas devem ter o mesmo número de colunas.")
+    shared = _shared_columns(left_cols, right_cols, left_key, right_key)
+    left_rows = (list(values) for _, values in _stream_current(db, left))
+    right_rows = (list(values) for _, values in _stream_current(db, right))
+    try:
+        return cmp_mod.compare(left_rows, right_rows, left_key, right_key, shared)
+    except ValueError as exc:
+        raise DomainError(str(exc)) from exc
+
+
+def create_derived_comparison(
+    db: DbSession,
+    left: Dataset,
+    right: Dataset,
+    spec: ComparisonSpec,
+    *,
+    actor: str,
+    correlation_id: str | None,
+) -> DerivedOutcome:
+    result = run_comparison(db, left, right, spec)
+    params: dict[str, Any] = {
+        "left_id": left.id,
+        "right_id": right.id,
+        "left_keys": list(spec.left_keys),
+        "right_keys": list(spec.right_keys),
+        "policy": {"operation": "compare"},
+    }
+    return store_derived(
+        db,
+        left,
+        right,
+        kind="compare",
+        operation_version=COMPARISON_OPERATION_VERSION,
+        label="Comparação por chave",
+        params=params,
+        counts=dict(result.counts),
         columns=result.columns,
         rows=result.rows,
         actor=actor,
