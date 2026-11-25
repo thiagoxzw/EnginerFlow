@@ -79,6 +79,20 @@ export function buildMappingPayload(
   return out;
 }
 
+/** Aviso exibido ao criar uma tabela derivada: nome, linhas, execução, hash e origens preservadas. */
+export function derivedNotice(result: {
+  name: string;
+  row_count: number;
+  run_id: string;
+  result_sha256: string;
+}): string {
+  return (
+    `Tabela derivada "${result.name}" criada com ${result.row_count} linhas. ` +
+    `Execução ${result.run_id.slice(0, 8)} · hash ${result.result_sha256.slice(0, 12)}. ` +
+    "As tabelas de origem não foram alteradas."
+  );
+}
+
 export function listDatasets(): Promise<DatasetSummary[]> {
   return apiFetch<DatasetSummary[]>("/api/v1/datasets");
 }

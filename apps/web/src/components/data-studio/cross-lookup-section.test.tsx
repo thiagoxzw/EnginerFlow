@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildLookupBody,
-  formatKeys,
-  keysComplete,
-} from "@/components/data-studio/cross-lookup-section";
+import { keysComplete } from "@/components/data-studio/key-pairs";
+import { buildLookupBody, formatKeys } from "@/components/data-studio/cross-lookup-section";
 
 describe("formatKeys", () => {
   it("mostra chaves compostas com separador legível e preserva zeros", () => {

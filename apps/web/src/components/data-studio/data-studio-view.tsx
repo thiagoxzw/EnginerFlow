@@ -13,6 +13,7 @@ import {
   TableAdminSection,
 } from "@/components/data-studio/table-admin";
 import { CrossLookupSection } from "@/components/data-studio/cross-lookup-section";
+import { JoinSection } from "@/components/data-studio/join-section";
 import { UploadSection } from "@/components/data-studio/upload-section";
 import { ReplaceSection } from "@/components/data-studio/replace-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
@@ -53,6 +54,8 @@ export function DataStudioView() {
   const router = useRouter();
   const datasets = useQuery({ queryKey: ["datasets"], queryFn: listDatasets });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Aviso da última operação (ex.: tabela derivada criada). Fica na página, não no painel que é trocado.
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (datasets.error instanceof ApiError && datasets.error.status === 401) {
@@ -105,7 +108,10 @@ export function DataStudioView() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => setSelectedId(d.id)}
+                      onClick={() => {
+                        setSelectedId(d.id);
+                        setNotice(null);
+                      }}
                       className="shrink-0 rounded-md border border-[var(--color-border)] px-3 py-1 text-sm"
                       aria-pressed={selectedId === d.id}
                     >
@@ -129,14 +135,25 @@ export function DataStudioView() {
 
         <main className="min-w-0 space-y-6">
           {selectedId ? (
-            <DatasetPanel
-              datasetId={selectedId}
-              onDeleted={() => setSelectedId(null)}
-              onOpen={(id) => {
-                setSelectedId(id);
-                void queryClient.invalidateQueries({ queryKey: ["datasets"] });
-              }}
-            />
+            <>
+              {notice ? (
+                <p role="status" className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm">
+                  {notice}
+                </p>
+              ) : null}
+              <DatasetPanel
+                datasetId={selectedId}
+                onDeleted={() => {
+                  setSelectedId(null);
+                  setNotice(null);
+                }}
+                onOpen={(id, message) => {
+                  setSelectedId(id);
+                  setNotice(message ?? null);
+                  void queryClient.invalidateQueries({ queryKey: ["datasets"] });
+                }}
+              />
+            </>
           ) : (
             <section className={sectionClass}>
               <h2 className="font-medium">Nenhuma tabela aberta</h2>
@@ -158,7 +175,7 @@ function DatasetPanel({
 }: {
   datasetId: string;
   onDeleted: () => void;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, message?: string) => void;
 }) {
   const queryClient = useQueryClient();
   const detail = useQuery({
@@ -252,6 +269,18 @@ function DatasetPanel({
         <summary className="cursor-pointer font-medium">Cruzar com outra tabela (PROCV)</summary>
         <div className="pt-3">
           <CrossLookupSection
+            leftId={datasetId}
+            leftColumns={data.columns}
+            datasets={allDatasets.data ?? []}
+            onDerived={onOpen}
+          />
+        </div>
+      </details>
+
+      <details className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Juntar com outra tabela (junção)</summary>
+        <div className="pt-3">
+          <JoinSection
             leftId={datasetId}
             leftColumns={data.columns}
             datasets={allDatasets.data ?? []}

@@ -58,7 +58,8 @@ class DerivedOut(BaseModel):
     name: str
     run_id: str
     row_count: int
-    counts: dict[str, int]
+    # Junção inclui a cardinalidade ("1:1", "N:M"...), por isso valores podem ser texto.
+    counts: dict[str, int | str]
     result_sha256: str
 
 
@@ -116,7 +117,7 @@ def lookup_derive(payload: LookupIn, request: Request, user: CurrentUser, db: Db
         name=outcome.dataset.name,
         run_id=outcome.run.id,
         row_count=outcome.row_count,
-        counts=outcome.counts,
+        counts={k: v for k, v in outcome.counts.items()},
         result_sha256=outcome.run.result_sha256,
     )
 
@@ -215,6 +216,6 @@ def join_derive(payload: JoinIn, request: Request, user: CurrentUser, db: DbDep)
         name=outcome.dataset.name,
         run_id=outcome.run.id,
         row_count=outcome.row_count,
-        counts=outcome.counts,
+        counts={k: v for k, v in outcome.counts.items()},
         result_sha256=outcome.run.result_sha256,
     )

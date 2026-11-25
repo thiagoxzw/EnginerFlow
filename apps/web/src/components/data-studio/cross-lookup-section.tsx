@@ -3,23 +3,24 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { KeyPairsEditor, keysComplete, type KeyPair } from "@/components/data-studio/key-pairs";
 import { errorText } from "@/components/data-studio/templates-section";
 import { apiFetch } from "@/lib/api";
-import { downloadExport, type ExportFormat, type DatasetSummary } from "@/lib/datasets";
+import {
+  derivedNotice,
+  downloadExport,
+  type DatasetSummary,
+  type ExportFormat,
+} from "@/lib/datasets";
 
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm";
 const buttonClass =
   "rounded-md border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-border)] disabled:opacity-50";
 
-const MAX_KEYS = 10;
 const LOOKUP_PATH = "/api/v1/crossing/lookup";
 
 type Duplicates = "first" | "all" | "error";
 type Unmatched = "keep_empty" | "drop";
-export interface KeyPair {
-  left: string;
-  right: string;
-}
 
 export interface LookupPreview {
   columns: string[];
@@ -74,11 +75,6 @@ export function formatKeys(keys: string[], limit = 10): string {
   return keys.slice(0, limit).map((k) => k.split("|").join(" + ")).join(" · ");
 }
 
-/** Pares de chave só valem quando todos os lados estão preenchidos. */
-export function keysComplete(keys: KeyPair[]): boolean {
-  return keys.length > 0 && keys.every((k) => k.left !== "" && k.right !== "");
-}
-
 export function CrossLookupSection({
   leftId,
   leftColumns,
@@ -88,7 +84,7 @@ export function CrossLookupSection({
   leftId: string;
   leftColumns: string[];
   datasets: DatasetSummary[];
-  onDerived: (id: string) => void;
+  onDerived: (id: string, message: string) => void;
 }) {
   const queryClient = useQueryClient();
   const others = datasets.filter((d) => d.id !== leftId);
@@ -99,7 +95,6 @@ export function CrossLookupSection({
   const [unmatched, setUnmatched] = useState<Unmatched>("keep_empty");
   const [preview, setPreview] = useState<LookupPreview | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [derived, setDerived] = useState<DerivedResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const right = others.find((d) => d.id === rightId);
@@ -112,18 +107,16 @@ export function CrossLookupSection({
 
   function invalidatePreview() {
     setPreview(null);
-    setDerived(null);
   }
 
-  function updateKey(index: number, patch: Partial<KeyPair>) {
-    setKeys((prev) => prev.map((k, i) => (i === index ? { ...k, ...patch } : k)));
+  function changeKeys(next: KeyPair[]) {
+    setKeys(next);
     invalidatePreview();
   }
 
   async function runPreview() {
     setBusy("preview");
     setMessage(null);
-    setDerived(null);
     try {
       const result = await apiFetch<LookupPreview>(`${LOOKUP_PATH}/preview`, {
         method: "POST",
@@ -148,8 +141,7 @@ export function CrossLookupSection({
       });
       await queryClient.invalidateQueries({ queryKey: ["datasets"] });
       setPreview(null);
-      setDerived(result);
-      onDerived(result.dataset_id);
+      onDerived(result.dataset_id, derivedNotice(result));
     } catch (error) {
       setMessage(errorText(error));
     } finally {
@@ -204,78 +196,15 @@ export function CrossLookupSection({
         </select>
       </div>
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">
-          Chaves de correspondência (todas precisam bater; máximo {MAX_KEYS})
-        </legend>
-        {keys.map((k, i) => (
-          <div key={i} className="flex flex-wrap items-end gap-2">
-            <div className="space-y-1">
-              <label htmlFor={`sp-lk-${i}`} className="block text-xs text-[var(--color-muted)]">
-                Coluna nesta tabela
-              </label>
-              <select
-                id={`sp-lk-${i}`}
-                value={k.left}
-                onChange={(e) => updateKey(i, { left: e.target.value })}
-                className={`${inputClass} min-w-40`}
-              >
-                {leftColumns.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <span aria-hidden="true" className="pb-2 text-[var(--color-muted)]">
-              =
-            </span>
-            <div className="space-y-1">
-              <label htmlFor={`sp-rk-${i}`} className="block text-xs text-[var(--color-muted)]">
-                Coluna na tabela de busca
-              </label>
-              <select
-                id={`sp-rk-${i}`}
-                value={k.right}
-                disabled={!rightId}
-                onChange={(e) => updateKey(i, { right: e.target.value })}
-                className={`${inputClass} min-w-40`}
-              >
-                <option value="">— escolher —</option>
-                {rightColumns.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {keys.length > 1 ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setKeys((prev) => prev.filter((_, j) => j !== i));
-                  invalidatePreview();
-                }}
-                className={buttonClass}
-              >
-                Remover chave {i + 1}
-              </button>
-            ) : null}
-          </div>
-        ))}
-        {keys.length < MAX_KEYS ? (
-          <button
-            type="button"
-            onClick={() => {
-              setKeys((prev) => [...prev, { left: leftColumns[0] ?? "", right: "" }]);
-              invalidatePreview();
-            }}
-            className={buttonClass}
-          >
-            Adicionar chave
-          </button>
-        ) : null}
-      </fieldset>
+      <KeyPairsEditor
+        idPrefix="sp"
+        legend="Chaves de correspondência"
+        keys={keys}
+        onChange={changeKeys}
+        leftColumns={leftColumns}
+        rightColumns={rightColumns}
+        rightEnabled={Boolean(rightId)}
+      />
 
       {rightId ? (
         <fieldset className="space-y-1">
@@ -351,19 +280,6 @@ export function CrossLookupSection({
         <p role="alert" className="text-sm text-[var(--color-danger)]">
           {message}
         </p>
-      ) : null}
-
-      {derived ? (
-        <div role="status" className="space-y-1 rounded-md border border-[var(--color-border)] p-3 text-sm">
-          <p>
-            Tabela derivada <strong>{derived.name}</strong> criada com {derived.row_count} linhas.
-          </p>
-          <p className="text-xs text-[var(--color-muted)]">
-            Origem: esta tabela e a tabela de busca escolhida. Execução {derived.run_id.slice(0, 8)} · hash{" "}
-            <span className="font-mono">{derived.result_sha256.slice(0, 12)}</span>. As tabelas de origem
-            não foram alteradas.
-          </p>
-        </div>
       ) : null}
 
       {preview ? (
