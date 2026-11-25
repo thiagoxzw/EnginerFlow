@@ -9,6 +9,7 @@ import {
   childrenIndex,
   expandableKeys,
   matchingLines,
+  isProvisionalCode,
   nodeKey,
   passesFilters,
   topLines,
@@ -19,7 +20,7 @@ import {
 
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm";
 const buttonClass = "rounded-md border border-[var(--color-border)] px-2 py-1 text-xs disabled:opacity-50";
-const MAX_ROWS = 1500;
+const PAGE_ROWS = 1500;
 
 function distinct(lines: BomLine[], pick: (l: BomLine) => string | null): string[] {
   return [...new Set(lines.map(pick).filter((v): v is string => Boolean(v)))].sort();
@@ -47,6 +48,8 @@ export function TreeView({
   const [term, setTerm] = useState("");
   const [filters, setFilters] = useState<TreeFilters>({});
   const [table, setTable] = useState(false);
+  // Limite VISUAL apenas: busca, filtros, cálculos e exportações usam sempre todas as linhas.
+  const [visible, setVisible] = useState(PAGE_ROWS);
   const [selectedKey, setSelectedKey] = useState<string | null>(focusKey);
 
   const roots = useMemo(() => topLines(lines), [lines]);
@@ -124,15 +127,20 @@ export function TreeView({
         <p className="text-xs text-[var(--color-muted)]" role="status">
           {table
             ? `${tableLines.length} linha(s)`
-            : `${shownRows.length} linha(s) visíveis${shownRows.length > MAX_ROWS ? ` · mostrando ${MAX_ROWS}; refine a busca` : ""}`}
+            : `${shownRows.length} linha(s) no resultado · mostrando ${Math.min(visible, shownRows.length)}`}
           {searching ? ` · ${matched.size} resultado(s) destacado(s)` : ""}
         </p>
 
+        {(table ? tableLines.length : shownRows.length) > visible ? (
+          <button type="button" className={buttonClass} onClick={() => setVisible((v) => v + PAGE_ROWS)}>
+            Mostrar mais {PAGE_ROWS} (restam {(table ? tableLines.length : shownRows.length) - visible})
+          </button>
+        ) : null}
         {table ? (
-          <TableList lines={tableLines} selectedKey={selectedKey} onSelect={setSelectedKey} />
+          <TableList lines={tableLines.slice(0, visible)} selectedKey={selectedKey} onSelect={setSelectedKey} />
         ) : (
           <ul role="tree" aria-label="Árvore de materiais" className="max-h-[70vh] overflow-auto rounded-md border border-[var(--color-border)]">
-            {shownRows.slice(0, MAX_ROWS).map((row) => {
+            {shownRows.slice(0, visible).map((row) => {
               const hit = searching && matched.has(row.key);
               const isSelected = row.key === selectedKey;
               return (
@@ -164,6 +172,7 @@ export function TreeView({
                     <span className="truncate text-[var(--color-muted)]">{row.line.description ?? ""}</span>
                     {row.cycle ? <span className="text-[var(--color-danger)]">ciclo</span> : null}
                     {row.line.inferred_parent ? <span className="text-xs text-[var(--color-muted)]">pai inferido</span> : null}
+                    {isProvisionalCode(row.line.child) ? <span className="text-xs text-[var(--color-danger)]" title="Código provisório de duplicação: não é código oficial">provisório</span> : null}
                   </button>
                   {onPickPart && row.line.child ? (
                     <button type="button" className={buttonClass} onClick={() => onPickPart({ code: row.line.child as string, unit: row.line.unit, description: row.line.description })}>
@@ -247,7 +256,7 @@ function TableList({ lines, selectedKey, onSelect }: { lines: BomLine[]; selecte
           </tr>
         </thead>
         <tbody>
-          {lines.slice(0, 1500).map((l) => (
+          {lines.map((l) => (
             <tr
               key={l.line_no}
               onClick={() => onSelect(nodeKey(l))}

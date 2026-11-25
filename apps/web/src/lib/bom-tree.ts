@@ -199,3 +199,8 @@ export function passesFilters(line: BomLine, filters: TreeFilters): boolean {
   if (filters.category && (line.category ?? "") !== filters.category) return false;
   return true;
 }
+
+/** Código provisório gerado por duplicação (sufixo -CP, -CP2...). Não é código oficial do ERP. */
+export function isProvisionalCode(code: string | null | undefined): boolean {
+  return Boolean(code) && /-CP\d*$/.test(code as string);
+}

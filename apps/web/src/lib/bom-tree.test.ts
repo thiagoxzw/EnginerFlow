@@ -5,6 +5,7 @@ import {
   addDec,
   ancestorKeys,
   expandableKeys,
+  isProvisionalCode,
   formatDec,
   matchingLines,
   mulDec,
@@ -114,5 +115,15 @@ describe("busca, ancestrais e filtros", () => {
     const kg = BUS.filter((l) => passesFilters(l, { unit: "kg" }));
     expect(kg.map((l) => l.line_no)).toEqual([5]);
     expect(BUS.filter((l) => passesFilters(l, {})).length).toBe(BUS.length);
+  });
+});
+
+describe("códigos provisórios", () => {
+  it("identifica o sufixo -CP e -CPn, e nunca código oficial comum", () => {
+    expect(isProvisionalCode("SUB-SYN-CP")).toBe(true);
+    expect(isProvisionalCode("SUB-SYN-CP3")).toBe(true);
+    expect(isProvisionalCode("SUB-SYN")).toBe(false);
+    expect(isProvisionalCode("CP-OFICIAL-123")).toBe(false);
+    expect(isProvisionalCode(null)).toBe(false);
   });
 });
