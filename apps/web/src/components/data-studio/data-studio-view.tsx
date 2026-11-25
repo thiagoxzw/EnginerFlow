@@ -96,17 +96,11 @@ export function DataStudioView() {
                 {datasets.data.map((d) => (
                   <li key={d.id} className="flex items-center justify-between gap-2 py-2">
                     <span className="min-w-0 text-sm">
-                      <strong className="block truncate">
-                        {d.name}
-                        {isDerived(d) ? (
-                          <span className="ml-2 rounded bg-[var(--color-border)] px-1.5 py-0.5 text-xs font-normal">
-                            derivada
-                          </span>
-                        ) : null}
-                      </strong>
+                      <strong className="block truncate">{d.name}</strong>
                       <span className="text-xs text-[var(--color-muted)]">
                         {d.row_count} linhas · {d.columns.length} colunas
                         {d.sheet_name ? ` · aba ${d.sheet_name}` : ""}
+                        {isDerived(d) ? " · derivada de cruzamento" : ""}
                       </span>
                     </span>
                     <button
