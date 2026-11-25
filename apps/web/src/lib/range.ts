@@ -70,6 +70,70 @@ export function clearRangeCells(
   return cells;
 }
 
+/**
+ * Valores do intervalo para copiar, só colunas visíveis. Desconhecido vira texto vazio no TSV,
+ * mas o valor não é convertido: zeros à esquerda e a diferença entre vazio e zero são preservados.
+ */
+export function rangeValues(
+  range: CellRange,
+  rows: { values: (string | null)[] }[],
+  hidden: Set<string>,
+  columns: string[],
+): (string | null)[][] {
+  const { r0, r1, c0, c1 } = normalizeRange(range);
+  const out: (string | null)[][] = [];
+  for (let r = r0; r <= r1; r += 1) {
+    const row = rows[r];
+    if (!row) continue;
+    const line: (string | null)[] = [];
+    for (let c = c0; c <= c1; c += 1) {
+      const column = columns[c];
+      if (column === undefined || hidden.has(column)) continue;
+      line.push(row.values[c] ?? null);
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * Preenchimento para baixo (Ctrl+D): cada coluna do intervalo recebe o valor da primeira linha.
+ * Valor desconhecido na origem é propagado como desconhecido (null), não como vazio.
+ */
+export function fillDownCells(
+  range: CellRange,
+  rows: { row_number: number; values: (string | null)[] }[],
+  columns: string[],
+  hidden: Set<string>,
+): PasteCell[] {
+  const { r0, r1, c0, c1 } = normalizeRange(range);
+  const source = rows[r0];
+  if (!source || r1 === r0) return [];
+  const cells: PasteCell[] = [];
+  for (let c = c0; c <= c1; c += 1) {
+    const column = columns[c];
+    if (column === undefined || hidden.has(column)) continue;
+    const value = source.values[c] ?? null;
+    for (let r = r0 + 1; r <= r1; r += 1) {
+      const row = rows[r];
+      if (!row) continue;
+      cells.push({ row_number: row.row_number, column, value });
+    }
+  }
+  return cells;
+}
+
+/** Atribuições de um valor digitado para todas as células visíveis do intervalo (edição em massa). */
+export function bulkValueCells(
+  range: CellRange,
+  rows: { row_number: number }[],
+  columns: string[],
+  hidden: Set<string>,
+  value: string,
+): PasteCell[] {
+  return clearRangeCells(range, rows, columns, hidden).map((cell) => ({ ...cell, value }));
+}
+
 /** Seleção de todas as células visíveis da página (Ctrl+A). */
 export function pageRange(rowCount: number, colCount: number): CellRange | null {
   if (rowCount <= 0 || colCount <= 0) return null;

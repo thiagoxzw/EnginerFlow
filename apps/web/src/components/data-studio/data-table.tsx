@@ -26,7 +26,16 @@ import {
 } from "@/lib/table-view";
 import { RowActions } from "@/components/data-studio/row-actions";
 import { errorText } from "@/components/data-studio/templates-section";
-import { copyText, parseTsv, planPaste, type CellTarget, type PasteCell, type PastePlan } from "@/lib/clipboard";
+import {
+  copyText,
+  parseTsv,
+  planPaste,
+  serializeTsv,
+  type CellTarget,
+  type PasteCell,
+  type PastePlan,
+} from "@/lib/clipboard";
+import { bulkValueCells, fillDownCells, rangeValues } from "@/lib/range";
 import { invalidateDataset } from "@/lib/invalidate";
 import { clearRangeCells, extendRange, pageRange, rangeContains, type CellRange } from "@/lib/range";
 import {
@@ -94,6 +103,8 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const range = selection && selection.scope === scopeKey ? selection.range : null;
   // Menu contextual (linha ou coluna) e ação estrutural que aguarda confirmação (exclusão de coluna).
   const [menu, setMenu] = useState<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+  // Valor digitado para edição em massa da seleção (texto vazio é um valor válido).
+  const [bulkValue, setBulkValue] = useState("");
   const [pendingAction, setPendingAction] = useState<{
     scope: string;
     message: string;
@@ -210,7 +221,13 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
       .filter((r) => selected.has(r.row_number))
       .map((r) => r.values);
     event.preventDefault();
-    event.clipboardData.setData("text/plain", copyText(focus.value, selectedValues));
+    // Com intervalo selecionado, copia o retângulo inteiro (TSV). Sem intervalo, mantém o comportamento anterior.
+    const block = range ? rangeValues(range, viewRows, hidden, viewColumns) : [];
+    const text =
+      selectedValues.length === 0 && block.length > 0
+        ? serializeTsv(block.map((line) => line.map((v) => v ?? "")))
+        : copyText(focus.value, selectedValues);
+    event.clipboardData.setData("text/plain", text);
   }
 
   function onPaste(event: ClipboardEvent<HTMLTableElement>) {
@@ -281,19 +298,74 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
     void applyClear(cells);
   }
 
-  async function applyClear(cells: PasteCell[]) {
+  /** Grava várias células numa única operação (limpeza, preenchimento ou valor em massa). */
+  async function applyCells(cells: PasteCell[], verb: string) {
     setPasting(true);
     setPasteMessage(null);
     try {
       await commitCells(datasetId, cells);
       await invalidateDataset(queryClient, datasetId);
-      setActionMessage(`${cells.length} célula(s) limpas. Uma única operação: desfazer reverte tudo.`);
+      setActionMessage(`${cells.length} célula(s) ${verb}. Uma única operação: desfazer reverte tudo.`);
     } catch (error) {
       setPasteMessage(errorText(error));
     } finally {
       setPasting(false);
       setPendingClear(null);
+      setPendingAction(null);
     }
+  }
+
+  function applyClear(cells: PasteCell[]) {
+    return applyCells(cells, "limpas");
+  }
+
+  /** Confirma antes de gravar muitas células (mesmo critério das colagens e limpezas). */
+  function requestWrite(cells: PasteCell[], verb: string, message: string) {
+    if (cells.length > CONFIRM_PASTE_ABOVE) {
+      setPendingAction({
+        scope: scopeKey,
+        message: `${message} ${cells.length} célula(s). Uma única operação; o desfazer reverte tudo.`,
+        confirmLabel: "Confirmar",
+        run: () => applyCells(cells, verb),
+      });
+      return;
+    }
+    void applyCells(cells, verb);
+  }
+
+  /** Ctrl+D: copia a primeira linha do intervalo para as de baixo, coluna a coluna. */
+  function fillDown() {
+    if (!range) return;
+    const cells = fillDownCells(range, viewRows, viewColumns, hidden);
+    if (cells.length === 0) {
+      setActionMessage("Nada a preencher: selecione ao menos duas linhas.");
+      return;
+    }
+    requestWrite(cells, "preenchidas", "Preencher para baixo:");
+  }
+
+  /** Edição em massa: grava o texto digitado (inclusive vazio) em todas as células do intervalo. */
+  function applyBulk() {
+    if (!range) return;
+    const cells = bulkValueCells(range, viewRows, viewColumns, hidden, bulkValue);
+    if (cells.length === 0) return;
+    requestWrite(cells, "alteradas", "Aplicar o valor à seleção:");
+  }
+
+  /** Seleciona a linha inteira (todas as colunas visíveis). */
+  function selectRow(rowIndex: number) {
+    commitRange({
+      anchor: { rowIndex, colIndex: 0 },
+      focus: { rowIndex, colIndex: Math.max(0, viewColumns.length - 1) },
+    });
+  }
+
+  /** Seleciona a coluna inteira (todas as linhas da página). */
+  function selectColumn(colIndex: number) {
+    commitRange({
+      anchor: { rowIndex: 0, colIndex },
+      focus: { rowIndex: Math.max(0, viewRows.length - 1), colIndex },
+    });
   }
 
   /** Executa uma operação estrutural e registra a mensagem; erros aparecem sem alterar nada. */
@@ -414,12 +486,17 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   /** Ctrl+A fora da edição seleciona as células da página exibida (nunca as de outras páginas). */
   function onKeyDown(event: KeyboardEvent<HTMLTableElement>) {
     if (event.target instanceof HTMLInputElement) return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const key = event.key.toLowerCase();
+    if (key === "a") {
       const all = pageRange(viewRows.length, viewColumns.length);
       if (!all) return;
       event.preventDefault();
       commitRange(all);
       setActionMessage("Células da página selecionadas. Delete limpa a seleção; desfazer reverte.");
+    } else if (key === "d") {
+      event.preventDefault();
+      fillDown();
     }
   }
 
@@ -633,6 +710,10 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                   <th
                     key={c}
                     onContextMenu={(e) => openColumnMenu(e, c)}
+                    // Clique na área do cabeçalho (fora do botão de ordenação) seleciona a coluna.
+                    onClick={(e) => {
+                      if (e.target === e.currentTarget) selectColumn(viewColumns.indexOf(c));
+                    }}
                     style={{
                       width,
                       minWidth: width,
@@ -681,8 +762,10 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                   />
                 </td>
                 <td
-                  className="px-2 py-1 text-[var(--color-muted)]"
+                  className="cursor-pointer px-2 py-1 text-[var(--color-muted)]"
+                  onClick={() => selectRow(rowIndex)}
                   onContextMenu={(e) => openRowMenu(e, row.row_number)}
+                  title="Clique para selecionar a linha inteira"
                 >
                   {row.row_number}
                 </td>
@@ -850,6 +933,26 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
           </button>
           <button type="button" onClick={() => setPendingClear(null)} disabled={pasting} className={buttonClass}>
             Cancelar
+          </button>
+        </div>
+      ) : null}
+
+      {range ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label className="flex items-center gap-2">
+            <span>Valor para a seleção</span>
+            <input
+              value={bulkValue}
+              onChange={(e) => setBulkValue(e.target.value)}
+              aria-label="Valor para a seleção"
+              className={inputClass}
+            />
+          </label>
+          <button type="button" onClick={applyBulk} disabled={pasting} className={buttonClass}>
+            Aplicar à seleção
+          </button>
+          <button type="button" onClick={fillDown} disabled={pasting} className={buttonClass}>
+            Preencher para baixo (Ctrl+D)
           </button>
         </div>
       ) : null}

@@ -56,6 +56,60 @@ export function editableText(value: string | null): string {
   return value ?? "";
 }
 
+/**
+ * Foco na célula da tabela mais próxima do destino (linha e coluna exibidas). Permite Home, End,
+ * Ctrl+Home, Ctrl+End, PageUp e PageDown sem depender de índices contínuos (colunas ocultas).
+ */
+export function focusNearest(
+  cell: HTMLElement,
+  row: number,
+  col: number,
+): { row: number; col: number } | null {
+  const table = cell.closest("table");
+  if (!table) return null;
+  let best: HTMLElement | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of table.querySelectorAll<HTMLElement>('td[data-cell="1"]')) {
+    const dr = Math.abs(Number(candidate.dataset.rowIndex) - row);
+    const dc = Math.abs(Number(candidate.dataset.colIndex) - col);
+    const score = dr * 1_000_000 + dc;
+    if (score < bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  if (!best) return null;
+  best.focus();
+  return { row: Number(best.dataset.rowIndex), col: Number(best.dataset.colIndex) };
+}
+
+/**
+ * Destino de uma tecla de navegação (sem as setas, que têm regra própria). Coordenadas pedidas:
+ * `focusNearest` ajusta para a célula real. Home/End usam colunas extremas; Ctrl+Home/End, a tabela inteira.
+ */
+export function jumpTarget(
+  key: string,
+  ctrl: boolean,
+  rowIndex: number,
+  colIndex: number,
+): { row: number; col: number } | null {
+  const FAR = 1_000_000;
+  switch (key) {
+    case "Home":
+      return ctrl ? { row: 0, col: 0 } : { row: rowIndex, col: 0 };
+    case "End":
+      return ctrl ? { row: FAR, col: FAR } : { row: rowIndex, col: FAR };
+    case "PageUp":
+      return { row: Math.max(0, rowIndex - PAGE_STEP), col: colIndex };
+    case "PageDown":
+      return { row: rowIndex + PAGE_STEP, col: colIndex };
+    default:
+      return null;
+  }
+}
+
+const PAGE_STEP = 10;
+
 /** Move o foco para a célula vizinha, dentro da mesma tabela. Retorna true se houve destino. */
 export function focusNeighbor(cell: HTMLElement, rowDelta: number, colDelta: number): boolean {
   const table = cell.closest("table");
@@ -138,6 +192,14 @@ export function EditableCell({
       range.onClear();
       return;
     }
+    const jump = jumpTarget(event.key, event.ctrlKey || event.metaKey, rowIndex, colIndex);
+    if (jump) {
+      event.preventDefault();
+      // A seleção usa a célula que de fato recebeu o foco, não o destino pedido.
+      const landed = focusNearest(event.currentTarget, jump.row, jump.col);
+      if (landed) range.onPointer(landed.row, landed.col, event.shiftKey);
+      return;
+    }
     const moves: Record<string, [number, number]> = {
       ArrowUp: [-1, 0],
       ArrowDown: [1, 0],
@@ -178,6 +240,10 @@ export function EditableCell({
       tabIndex={0}
       aria-label={`${column}, linha ${rowNumber}`}
       onMouseDown={(e) => range.onPointer(rowIndex, colIndex, e.shiftKey)}
+      // Arrastar com o botão pressionado estende o intervalo até a célula sob o ponteiro.
+      onMouseEnter={(e) => {
+        if (e.buttons === 1) range.onPointer(rowIndex, colIndex, true);
+      }}
       onDoubleClick={() => !saving && start()}
       onKeyDown={onCellKey}
       data-in-range={range.inRange ? "1" : undefined}

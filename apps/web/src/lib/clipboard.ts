@@ -29,7 +29,8 @@ export interface CellTarget {
 export interface PasteCell {
   row_number: number;
   column: string;
-  value: string;
+  /** Texto, vazio ("") ou desconhecido (null). Colagens vindas do TSV são sempre texto. */
+  value: string | null;
 }
 
 export type PastePlan =
