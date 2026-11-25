@@ -56,6 +56,16 @@ export function focusNeighbor(cell: HTMLElement, rowDelta: number, colDelta: num
   return true;
 }
 
+export interface RangeHandlers {
+  inRange: boolean;
+  /** Clique: seleciona a célula; com Shift, estende o intervalo a partir da âncora. */
+  onPointer: (rowIndex: number, colIndex: number, shift: boolean) => void;
+  /** Shift+seta: move a ponta do intervalo. */
+  onExtend: (rowDelta: number, colDelta: number) => void;
+  /** Delete/Backspace: limpa o intervalo selecionado (uma operação, desfazível). */
+  onClear: () => void;
+}
+
 export function EditableCell({
   datasetId,
   rowNumber,
@@ -63,6 +73,7 @@ export function EditableCell({
   colIndex,
   column,
   value,
+  range,
 }: {
   datasetId: string;
   rowNumber: number;
@@ -70,6 +81,7 @@ export function EditableCell({
   colIndex: number;
   column: string;
   value: string | null;
+  range: RangeHandlers;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -105,6 +117,11 @@ export function EditableCell({
       start();
       return;
     }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      range.onClear();
+      return;
+    }
     const moves: Record<string, [number, number]> = {
       ArrowUp: [-1, 0],
       ArrowDown: [1, 0],
@@ -114,6 +131,12 @@ export function EditableCell({
     const move = moves[event.key];
     if (move) {
       event.preventDefault();
+      if (event.shiftKey) {
+        range.onExtend(move[0], move[1]);
+        return;
+      }
+      // Seta sem Shift: a seleção volta a ser só esta célula e o foco anda para o vizinho.
+      range.onPointer(rowIndex, colIndex, false);
       focusNeighbor(event.currentTarget, move[0], move[1]);
     }
   }
@@ -138,9 +161,13 @@ export function EditableCell({
       data-col-index={colIndex}
       tabIndex={0}
       aria-label={`${column}, linha ${rowNumber}`}
+      onMouseDown={(e) => range.onPointer(rowIndex, colIndex, e.shiftKey)}
       onDoubleClick={() => !saving && start()}
       onKeyDown={onCellKey}
-      className="px-2 py-1 text-xs focus:outline-2 focus:outline-[var(--color-accent)]"
+      data-in-range={range.inRange ? "1" : undefined}
+      className={`px-2 py-1 text-xs focus:outline-2 focus:outline-[var(--color-accent)] ${
+        range.inRange ? "bg-[var(--color-selection,rgba(59,130,246,0.18))]" : ""
+      }`}
     >
       {editing ? (
         <input

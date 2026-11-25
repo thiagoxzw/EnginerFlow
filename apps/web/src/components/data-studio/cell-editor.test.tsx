@@ -33,6 +33,7 @@ function renderCell(value: string | null) {
               colIndex={0}
               column="SYN-Código"
               value={value}
+              range={{ inRange: false, onPointer: () => {}, onExtend: () => {}, onClear: () => {} }}
             />
           </tr>
         </tbody>

@@ -1,13 +1,14 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ClipboardEvent } from "react";
+import { useState, type ClipboardEvent, type KeyboardEvent } from "react";
 
 import { EditableCell, commitCells } from "@/components/data-studio/cell-editor";
 import { RowActions } from "@/components/data-studio/row-actions";
 import { errorText } from "@/components/data-studio/templates-section";
 import { copyText, parseTsv, planPaste, type CellTarget, type PasteCell, type PastePlan } from "@/lib/clipboard";
 import { invalidateDataset } from "@/lib/invalidate";
+import { clearRangeCells, extendRange, pageRange, rangeContains, type CellRange } from "@/lib/range";
 import {
   NUMERIC_OPS,
   OP_LABELS,
@@ -65,6 +66,16 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const [pasteMessage, setPasteMessage] = useState<string | null>(null);
   const [pendingPaste, setPendingPaste] = useState<(PastePlan & { ok: true }) | null>(null);
   const [pasting, setPasting] = useState(false);
+  // Intervalo de células (mouse e teclado) e limpeza grande que aguarda confirmação.
+  // A seleção guarda a chave da visão em que foi feita: trocar página, filtro, ordem ou busca a descarta.
+  const [selection, setSelection] = useState<{ scope: string; range: CellRange } | null>(null);
+  const [pendingClear, setPendingClear] = useState<{ scope: string; cells: PasteCell[] } | null>(null);
+  const scopeKey = `${offset}|${limit}|${q}|${JSON.stringify(sort)}|${JSON.stringify(filters)}`;
+  const range = selection && selection.scope === scopeKey ? selection.range : null;
+
+  function commitRange(next: CellRange | null) {
+    setSelection(next ? { scope: scopeKey, range: next } : null);
+  }
   // Colunas ocultas: preferência de visualização desta tabela, guardada só neste navegador.
   const hiddenKey = `engiflow:colunas-ocultas:${datasetId}`;
   const [hidden, setHidden] = useState<Set<string>>(() => readHiddenColumns(hiddenKey));
@@ -137,6 +148,67 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
       return;
     }
     void applyPaste(plan.cells);
+  }
+
+  function pointer(rowIndex: number, colIndex: number, shift: boolean) {
+    commitRange(
+      shift && range
+        ? { anchor: range.anchor, focus: { rowIndex, colIndex } }
+        : { anchor: { rowIndex, colIndex }, focus: { rowIndex, colIndex } },
+    );
+  }
+
+  function extend(rowIndex: number, colIndex: number, rowDelta: number, colDelta: number) {
+    const maxRow = (rows.data?.rows.length ?? 1) - 1;
+    const maxCol = columns.length - 1;
+    commitRange(
+      extendRange(
+        range ?? { anchor: { rowIndex, colIndex }, focus: { rowIndex, colIndex } },
+        rowDelta,
+        colDelta,
+        maxRow,
+        maxCol,
+      ),
+    );
+  }
+
+  /** Delete/Backspace: limpa o intervalo visível. Grandes limpezas pedem confirmação, como as colagens. */
+  function clearSelection() {
+    if (!range || !rows.data) return;
+    const cells = clearRangeCells(range, rows.data.rows, columns, hidden);
+    if (cells.length === 0) return;
+    if (cells.length > CONFIRM_PASTE_ABOVE) {
+      setPendingClear({ scope: scopeKey, cells });
+      return;
+    }
+    void applyClear(cells);
+  }
+
+  async function applyClear(cells: PasteCell[]) {
+    setPasting(true);
+    setPasteMessage(null);
+    try {
+      await commitCells(datasetId, cells);
+      await invalidateDataset(queryClient, datasetId);
+      setActionMessage(`${cells.length} célula(s) limpas. Uma única operação: desfazer reverte tudo.`);
+    } catch (error) {
+      setPasteMessage(errorText(error));
+    } finally {
+      setPasting(false);
+      setPendingClear(null);
+    }
+  }
+
+  /** Ctrl+A fora da edição seleciona as células da página exibida (nunca as de outras páginas). */
+  function onKeyDown(event: KeyboardEvent<HTMLTableElement>) {
+    if (event.target instanceof HTMLInputElement) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      const all = pageRange(rows.data?.rows.length ?? 0, columns.length);
+      if (!all) return;
+      event.preventDefault();
+      commitRange(all);
+      setActionMessage("Células da página selecionadas. Delete limpa a seleção; desfazer reverte.");
+    }
   }
 
   async function applyPaste(cells: PasteCell[]) {
@@ -318,7 +390,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
       ) : null}
 
       <div className="max-h-[32rem] overflow-auto rounded-md border border-[var(--color-border)]">
-        <table className="w-full text-sm" onCopy={onCopy} onPaste={onPaste}>
+        <table className="w-full text-sm" onCopy={onCopy} onPaste={onPaste} onKeyDown={onKeyDown}>
           <thead className="sticky top-0 bg-[var(--color-surface)] text-left text-[var(--color-muted)]">
             <tr>
               <th className="px-2 py-1 font-medium">
@@ -382,6 +454,12 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                       colIndex={i}
                       column={columns[i] ?? ""}
                       value={value}
+                      range={{
+                        inRange: rangeContains(range, rowIndex, i),
+                        onPointer: pointer,
+                        onExtend: (rowDelta, colDelta) => extend(rowIndex, i, rowDelta, colDelta),
+                        onClear: clearSelection,
+                      }}
                     />
                   ),
                 )}
@@ -482,6 +560,25 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
             Confirmar colagem
           </button>
           <button type="button" onClick={() => setPendingPaste(null)} disabled={pasting} className={buttonClass}>
+            Cancelar
+          </button>
+        </div>
+      ) : null}
+
+      {pendingClear && pendingClear.scope === scopeKey ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+          <span>
+            Limpar {pendingClear.cells.length} célula(s)? Uma única operação; o desfazer reverte tudo.
+          </span>
+          <button
+            type="button"
+            onClick={() => void applyClear(pendingClear.cells)}
+            disabled={pasting}
+            className={buttonClass}
+          >
+            Confirmar limpeza
+          </button>
+          <button type="button" onClick={() => setPendingClear(null)} disabled={pasting} className={buttonClass}>
             Cancelar
           </button>
         </div>
