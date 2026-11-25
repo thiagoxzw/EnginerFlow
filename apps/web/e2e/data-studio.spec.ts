@@ -19,6 +19,7 @@ test("importa, filtra, substitui em lote com prévia e desfaz pelo histórico", 
   await page.goto("/login");
   // Espera o React hidratar antes de preencher: evita clique antes do formulário estar ativo.
   await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => Object.keys(document.querySelector("form") ?? {}).some((k) => k.startsWith("__reactProps")));
   await page.getByLabel("E-mail").fill(EMAIL);
   await page.getByLabel("Senha").fill(PASSWORD);
   await page.getByRole("button", { name: /entrar/i }).click();

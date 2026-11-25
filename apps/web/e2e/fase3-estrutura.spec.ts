@@ -15,6 +15,7 @@ function csvFor(uid: string): string {
 async function login(page: Page) {
   await page.goto("/login");
   await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => Object.keys(document.querySelector("form") ?? {}).some((k) => k.startsWith("__reactProps")));
   await page.getByLabel("E-mail").fill(EMAIL);
   await page.getByLabel("Senha").fill(PASSWORD);
   await page.getByRole("button", { name: /entrar/i }).click();
