@@ -77,6 +77,7 @@ def upgrade() -> None:
         sa.Column("manufacturer", sa.String(255), nullable=True),
         sa.Column("part_number", sa.String(255), nullable=True),
         sa.Column("notes", sa.String(500), nullable=True),
+        sa.Column("category", sa.String(120), nullable=True),
         sa.Column("inferred_parent", sa.Boolean, nullable=False, server_default=sa.false()),
     )
     op.create_index("ix_bom_lines_revision_id", "bom_lines", ["revision_id"])

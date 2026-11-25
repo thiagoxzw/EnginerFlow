@@ -86,6 +86,7 @@ class BomLine(Base):
     manufacturer: Mapped[str | None] = mapped_column(String(255), nullable=True)
     part_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     inferred_parent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 

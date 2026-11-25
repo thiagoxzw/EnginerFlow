@@ -48,6 +48,7 @@ FIELDS = (
     "manufacturer",
     "part_number",
     "notes",
+    "category",
 )
 REQUIRED_ALWAYS = ("child_code", "qty")
 MAX_LINES = 50_000
@@ -167,6 +168,7 @@ def build_lines(
                 manufacturer=_clean_text(_cell(values, index.get("manufacturer"))),
                 part_number=_clean_text(_cell(values, index.get("part_number"))),
                 notes=_clean_text(_cell(values, index.get("notes"))),
+                category=_clean_text(_cell(values, index.get("category"))),
                 source_row=row_number,
                 inferred_parent=inferred,
             )
@@ -216,6 +218,7 @@ def _line_out(line: BomLine) -> dict[str, Any]:
         "manufacturer": line.manufacturer,
         "part_number": line.part_number,
         "notes": line.notes,
+        "category": line.category,
         "inferred_parent": line.inferred_parent,
     }
 
@@ -280,6 +283,7 @@ def _write_revision(
                 manufacturer=line.manufacturer,
                 part_number=line.part_number,
                 notes=line.notes,
+                category=line.category,
                 inferred_parent=line.inferred_parent,
             )
         )
@@ -358,6 +362,7 @@ def load_lines(db: DbSession, revision_id: str) -> list[BomLine]:
             manufacturer=r.manufacturer,
             part_number=r.part_number,
             notes=r.notes,
+            category=r.category,
             source_row=r.source_row,
             inferred_parent=r.inferred_parent,
         )

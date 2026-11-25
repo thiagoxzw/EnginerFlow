@@ -40,6 +40,7 @@ class BomLine:
     manufacturer: str | None = None
     part_number: str | None = None
     notes: str | None = None
+    category: str | None = None
     source_row: int | None = None
     inferred_parent: bool = False
 
