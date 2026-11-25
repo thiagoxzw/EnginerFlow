@@ -62,6 +62,8 @@ def test_derive_creates_traced_table_and_keeps_sources(
 
     detail = logged_client.get(f"/api/v1/datasets/{derived['dataset_id']}").json()
     assert "SYN-Descrição" in detail["columns"]
+    assert detail["source_kind"] == "derived"
+    assert logged_client.get(f"/api/v1/datasets/{left['id']}").json()["source_kind"] == "import"
     values = _values(logged_client, derived["dataset_id"])
     assert values[0][0] == "00123"  # zeros preservados na derivada
     assert values[1][0] == "0123"

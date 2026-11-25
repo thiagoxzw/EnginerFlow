@@ -26,6 +26,7 @@ import {
   exportDuplicatesPath,
   getDataset,
   getDuplicates,
+  isDerived,
   listDatasets,
   saveMapping,
   uploadDataset,
@@ -95,7 +96,14 @@ export function DataStudioView() {
                 {datasets.data.map((d) => (
                   <li key={d.id} className="flex items-center justify-between gap-2 py-2">
                     <span className="min-w-0 text-sm">
-                      <strong className="block truncate">{d.name}</strong>
+                      <strong className="block truncate">
+                        {d.name}
+                        {isDerived(d) ? (
+                          <span className="ml-2 rounded bg-[var(--color-border)] px-1.5 py-0.5 text-xs font-normal">
+                            derivada
+                          </span>
+                        ) : null}
+                      </strong>
                       <span className="text-xs text-[var(--color-muted)]">
                         {d.row_count} linhas · {d.columns.length} colunas
                         {d.sheet_name ? ` · aba ${d.sheet_name}` : ""}
@@ -263,6 +271,7 @@ function DatasetPanel({
           <h2 className="truncate text-lg font-semibold">{data.name}</h2>
           <p className="text-xs text-[var(--color-muted)]">
             {data.row_count} linhas · {data.columns.length} colunas{sheetInfo}
+            {isDerived(data) ? " · tabela derivada de um cruzamento (origens preservadas)" : ""}
           </p>
         </div>
         <ExportButtons

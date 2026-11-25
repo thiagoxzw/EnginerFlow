@@ -65,6 +65,7 @@ class DatasetSummary(BaseModel):
     mapping: dict[str, str]
     warnings: list[str]
     created_at: datetime
+    source_kind: str = "import"
 
 
 class DatasetDetail(DatasetSummary):
@@ -151,6 +152,7 @@ def _summary(dataset: Dataset) -> DatasetSummary:
         mapping=dict(dataset.mapping),
         warnings=list(dataset.warnings),
         created_at=dataset.created_at,
+        source_kind=dataset.source_kind,
     )
 
 

@@ -24,6 +24,12 @@ export interface DatasetSummary {
   mapping: Partial<Record<CanonicalField, string>>;
   warnings: string[];
   created_at: string;
+  /** "import" para arquivos enviados; "derived" para resultados de cruzamento. */
+  source_kind?: string;
+}
+
+export function isDerived(dataset: Pick<DatasetSummary, "source_kind">): boolean {
+  return dataset.source_kind === "derived";
 }
 
 export interface DatasetDetail extends DatasetSummary {

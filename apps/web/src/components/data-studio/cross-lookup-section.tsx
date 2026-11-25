@@ -5,14 +5,21 @@ import { useState } from "react";
 
 import { errorText } from "@/components/data-studio/templates-section";
 import { apiFetch } from "@/lib/api";
-import type { DatasetSummary } from "@/lib/datasets";
+import { downloadExport, type ExportFormat, type DatasetSummary } from "@/lib/datasets";
 
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm";
 const buttonClass =
   "rounded-md border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-border)] disabled:opacity-50";
 
+const MAX_KEYS = 10;
+const LOOKUP_PATH = "/api/v1/crossing/lookup";
+
 type Duplicates = "first" | "all" | "error";
 type Unmatched = "keep_empty" | "drop";
+export interface KeyPair {
+  left: string;
+  right: string;
+}
 
 export interface LookupPreview {
   columns: string[];
@@ -27,7 +34,10 @@ export interface LookupPreview {
 export interface DerivedResult {
   dataset_id: string;
   name: string;
+  run_id: string;
   row_count: number;
+  counts: Record<string, number>;
+  result_sha256: string;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -37,25 +47,36 @@ const STATUS_LABELS: Record<string, string> = {
   "chave inválida": "Chave inválida (vazia ou desconhecida)",
 };
 
-/** Monta o corpo do contrato da API. Campos vazios não são enviados. */
-export function buildLookupBody(form: {
+export interface LookupForm {
   leftId: string;
   rightId: string;
-  leftKey: string;
-  rightKey: string;
+  keys: KeyPair[];
   returns: string[];
   duplicates: Duplicates;
   unmatched: Unmatched;
-}) {
+}
+
+/** Monta o corpo do contrato da API a partir do formulário. */
+export function buildLookupBody(form: LookupForm) {
   return {
     left_id: form.leftId,
     right_id: form.rightId,
-    left_keys: [form.leftKey],
-    right_keys: [form.rightKey],
+    left_keys: form.keys.map((k) => k.left),
+    right_keys: form.keys.map((k) => k.right),
     return_columns: form.returns,
     duplicates: form.duplicates,
     unmatched: form.unmatched,
   };
+}
+
+/** Chaves compostas chegam como "valor1|valor2"; na tela ficam como "valor1 + valor2". */
+export function formatKeys(keys: string[], limit = 10): string {
+  return keys.slice(0, limit).map((k) => k.split("|").join(" + ")).join(" · ");
+}
+
+/** Pares de chave só valem quando todos os lados estão preenchidos. */
+export function keysComplete(keys: KeyPair[]): boolean {
+  return keys.length > 0 && keys.every((k) => k.left !== "" && k.right !== "");
 }
 
 export function CrossLookupSection({
@@ -72,55 +93,83 @@ export function CrossLookupSection({
   const queryClient = useQueryClient();
   const others = datasets.filter((d) => d.id !== leftId);
   const [rightId, setRightId] = useState("");
-  const [leftKey, setLeftKey] = useState(leftColumns[0] ?? "");
-  const [rightKey, setRightKey] = useState("");
+  const [keys, setKeys] = useState<KeyPair[]>([{ left: leftColumns[0] ?? "", right: "" }]);
   const [returns, setReturns] = useState<string[]>([]);
   const [duplicates, setDuplicates] = useState<Duplicates>("first");
   const [unmatched, setUnmatched] = useState<Unmatched>("keep_empty");
   const [preview, setPreview] = useState<LookupPreview | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [derived, setDerived] = useState<DerivedResult | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const right = others.find((d) => d.id === rightId);
   const rightColumns = right?.columns ?? [];
-  const ready = Boolean(rightId && leftKey && rightKey);
+  const ready = Boolean(rightId) && keysComplete(keys);
 
-  function body() {
-    return buildLookupBody({ leftId, rightId, leftKey, rightKey, returns, duplicates, unmatched });
+  function form(): LookupForm {
+    return { leftId, rightId, keys, returns, duplicates, unmatched };
+  }
+
+  function invalidatePreview() {
+    setPreview(null);
+    setDerived(null);
+  }
+
+  function updateKey(index: number, patch: Partial<KeyPair>) {
+    setKeys((prev) => prev.map((k, i) => (i === index ? { ...k, ...patch } : k)));
+    invalidatePreview();
   }
 
   async function runPreview() {
-    setBusy(true);
+    setBusy("preview");
     setMessage(null);
+    setDerived(null);
     try {
-      const result = await apiFetch<LookupPreview>("/api/v1/crossing/lookup/preview", {
+      const result = await apiFetch<LookupPreview>(`${LOOKUP_PATH}/preview`, {
         method: "POST",
-        body: JSON.stringify(body()),
+        body: JSON.stringify(buildLookupBody(form())),
       });
       setPreview(result);
     } catch (error) {
       setPreview(null);
       setMessage(errorText(error));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   async function createDerived() {
-    setBusy(true);
+    setBusy("derive");
     setMessage(null);
     try {
-      const result = await apiFetch<DerivedResult>("/api/v1/crossing/lookup/derive", {
+      const result = await apiFetch<DerivedResult>(`${LOOKUP_PATH}/derive`, {
         method: "POST",
-        body: JSON.stringify(body()),
+        body: JSON.stringify(buildLookupBody(form())),
       });
       await queryClient.invalidateQueries({ queryKey: ["datasets"] });
       setPreview(null);
+      setDerived(result);
       onDerived(result.dataset_id);
     } catch (error) {
       setMessage(errorText(error));
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  }
+
+  async function exportPreview(format: ExportFormat) {
+    setBusy(`export-${format}`);
+    setMessage(null);
+    try {
+      await downloadExport(`${LOOKUP_PATH}/export`, format, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildLookupBody(form())),
+      });
+    } catch (error) {
+      setMessage(errorText(error));
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -131,69 +180,102 @@ export function CrossLookupSection({
         Nada é alterado nas tabelas de origem: o resultado vira uma tabela nova.
       </p>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="sp-right" className="block text-sm font-medium">
-            Tabela de busca
-          </label>
-          <select
-            id="sp-right"
-            value={rightId}
-            onChange={(e) => {
-              setRightId(e.target.value);
-              setRightKey("");
-              setReturns([]);
-              setPreview(null);
-            }}
-            className={`${inputClass} w-full`}
-          >
-            <option value="">— escolher —</option>
-            {others.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="sp-left-key" className="block text-sm font-medium">
-              Chave nesta tabela
-            </label>
-            <select
-              id="sp-left-key"
-              value={leftKey}
-              onChange={(e) => setLeftKey(e.target.value)}
-              className={`${inputClass} w-full`}
-            >
-              {leftColumns.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="sp-right-key" className="block text-sm font-medium">
-              Chave na tabela de busca
-            </label>
-            <select
-              id="sp-right-key"
-              value={rightKey}
-              onChange={(e) => setRightKey(e.target.value)}
-              disabled={!rightId}
-              className={`${inputClass} w-full`}
-            >
-              <option value="">— escolher —</option>
-              {rightColumns.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+      <div className="space-y-1">
+        <label htmlFor="sp-right" className="block text-sm font-medium">
+          Tabela de busca
+        </label>
+        <select
+          id="sp-right"
+          value={rightId}
+          onChange={(e) => {
+            setRightId(e.target.value);
+            setKeys((prev) => prev.map((k) => ({ ...k, right: "" })));
+            setReturns([]);
+            invalidatePreview();
+          }}
+          className={`${inputClass} w-full md:w-96`}
+        >
+          <option value="">— escolher —</option>
+          {others.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
       </div>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium">
+          Chaves de correspondência (todas precisam bater; máximo {MAX_KEYS})
+        </legend>
+        {keys.map((k, i) => (
+          <div key={i} className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <label htmlFor={`sp-lk-${i}`} className="block text-xs text-[var(--color-muted)]">
+                Coluna nesta tabela
+              </label>
+              <select
+                id={`sp-lk-${i}`}
+                value={k.left}
+                onChange={(e) => updateKey(i, { left: e.target.value })}
+                className={`${inputClass} min-w-40`}
+              >
+                {leftColumns.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <span aria-hidden="true" className="pb-2 text-[var(--color-muted)]">
+              =
+            </span>
+            <div className="space-y-1">
+              <label htmlFor={`sp-rk-${i}`} className="block text-xs text-[var(--color-muted)]">
+                Coluna na tabela de busca
+              </label>
+              <select
+                id={`sp-rk-${i}`}
+                value={k.right}
+                disabled={!rightId}
+                onChange={(e) => updateKey(i, { right: e.target.value })}
+                className={`${inputClass} min-w-40`}
+              >
+                <option value="">— escolher —</option>
+                {rightColumns.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {keys.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setKeys((prev) => prev.filter((_, j) => j !== i));
+                  invalidatePreview();
+                }}
+                className={buttonClass}
+              >
+                Remover chave {i + 1}
+              </button>
+            ) : null}
+          </div>
+        ))}
+        {keys.length < MAX_KEYS ? (
+          <button
+            type="button"
+            onClick={() => {
+              setKeys((prev) => [...prev, { left: leftColumns[0] ?? "", right: "" }]);
+              invalidatePreview();
+            }}
+            className={buttonClass}
+          >
+            Adicionar chave
+          </button>
+        ) : null}
+      </fieldset>
 
       {rightId ? (
         <fieldset className="space-y-1">
@@ -204,11 +286,12 @@ export function CrossLookupSection({
                 <input
                   type="checkbox"
                   checked={returns.includes(c)}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setReturns((prev) =>
                       e.target.checked ? [...prev, c] : prev.filter((x) => x !== c),
-                    )
-                  }
+                    );
+                    invalidatePreview();
+                  }}
                 />
                 {c}
               </label>
@@ -225,7 +308,10 @@ export function CrossLookupSection({
           <select
             id="sp-dup"
             value={duplicates}
-            onChange={(e) => setDuplicates(e.target.value as Duplicates)}
+            onChange={(e) => {
+              setDuplicates(e.target.value as Duplicates);
+              invalidatePreview();
+            }}
             className={inputClass}
           >
             <option value="first">Usar a primeira</option>
@@ -240,22 +326,44 @@ export function CrossLookupSection({
           <select
             id="sp-unm"
             value={unmatched}
-            onChange={(e) => setUnmatched(e.target.value as Unmatched)}
+            onChange={(e) => {
+              setUnmatched(e.target.value as Unmatched);
+              invalidatePreview();
+            }}
             className={inputClass}
           >
             <option value="keep_empty">Manter (com vazio)</option>
             <option value="drop">Remover do resultado</option>
           </select>
         </div>
-        <button type="button" onClick={() => void runPreview()} disabled={!ready || busy} className={buttonClass}>
-          {busy ? "Processando…" : "Gerar prévia"}
+        <button type="button" onClick={() => void runPreview()} disabled={!ready || busy !== null} className={buttonClass}>
+          {busy === "preview" ? "Gerando prévia…" : "Gerar prévia"}
         </button>
       </div>
+
+      <p role="status" className="text-sm text-[var(--color-muted)]">
+        {busy === "preview" ? "Calculando a prévia; tabelas grandes podem levar alguns segundos." : null}
+        {busy === "derive" ? "Criando a tabela derivada…" : null}
+        {busy === "export-csv" || busy === "export-xlsx" ? "Preparando a exportação…" : null}
+      </p>
 
       {message ? (
         <p role="alert" className="text-sm text-[var(--color-danger)]">
           {message}
         </p>
+      ) : null}
+
+      {derived ? (
+        <div role="status" className="space-y-1 rounded-md border border-[var(--color-border)] p-3 text-sm">
+          <p>
+            Tabela derivada <strong>{derived.name}</strong> criada com {derived.row_count} linhas.
+          </p>
+          <p className="text-xs text-[var(--color-muted)]">
+            Origem: esta tabela e a tabela de busca escolhida. Execução {derived.run_id.slice(0, 8)} · hash{" "}
+            <span className="font-mono">{derived.result_sha256.slice(0, 12)}</span>. As tabelas de origem
+            não foram alteradas.
+          </p>
+        </div>
       ) : null}
 
       {preview ? (
@@ -272,21 +380,22 @@ export function CrossLookupSection({
 
           {preview.duplicate_keys.length > 0 ? (
             <p className="text-sm">
-              Chaves com múltiplas correspondências (amostra): {preview.duplicate_keys.slice(0, 10).join(", ")}
+              Chaves com múltiplas correspondências (amostra): {formatKeys(preview.duplicate_keys)}
             </p>
           ) : null}
           {preview.unmatched_keys.length > 0 ? (
             <p className="text-sm">
-              Chaves não encontradas (amostra): {preview.unmatched_keys.slice(0, 10).join(", ")}
+              Chaves não encontradas (amostra): {formatKeys(preview.unmatched_keys)}
             </p>
           ) : null}
 
           <div className="max-h-80 overflow-auto rounded-md border border-[var(--color-border)]">
             <table className="w-full text-xs">
+              <caption className="sr-only">Prévia do resultado do PROCV</caption>
               <thead className="sticky top-0 bg-[var(--color-surface)] text-left text-[var(--color-muted)]">
                 <tr>
                   {preview.columns.map((c) => (
-                    <th key={c} className="px-2 py-1 font-medium">
+                    <th key={c} scope="col" className="px-2 py-1 font-medium">
                       {c}
                     </th>
                   ))}
@@ -307,11 +416,27 @@ export function CrossLookupSection({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={() => void createDerived()} disabled={busy} className={buttonClass}>
+            <button type="button" onClick={() => void createDerived()} disabled={busy !== null} className={buttonClass}>
               Criar tabela derivada
             </button>
+            <button
+              type="button"
+              onClick={() => void exportPreview("csv")}
+              disabled={busy !== null}
+              className={buttonClass}
+            >
+              Exportar CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => void exportPreview("xlsx")}
+              disabled={busy !== null}
+              className={buttonClass}
+            >
+              Exportar XLSX
+            </button>
             <span className="text-xs text-[var(--color-muted)]">
-              Cria uma tabela nova com o resultado. As tabelas de origem não são alteradas.
+              A tabela derivada guarda a origem e o hash do resultado. Exportação usa o mesmo cálculo da prévia.
             </span>
           </div>
         </div>
