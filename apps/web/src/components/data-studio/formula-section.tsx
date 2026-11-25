@@ -18,6 +18,9 @@ export const SYNTAX_HELP = [
   "SOMA(a;b) · MEDIA(a;b) · MIN(a;b) · MAX(a;b) · CONTAR(a;b)",
   'SE([Qtd]>3; "grande"; "pequeno") · comparações = <> < > <= >=',
   'CONCAT(a;"-";b) · MAIUSC(t) · MINUSC(t) · ESQUERDA(t;3) · DIREITA(t;2)',
+  "E(a;b) · OU(a;b) · VERDADEIRO · FALSO · SEERRO(valor; alternativo)",
+  "ABS(n) · ARRED(n;casas) · ARRUMAR(t) · NUM.CARACT(t)",
+  "Aliases: MÍNIMO · MÁXIMO · CONTAGEM · CONCATENAR · MAIÚSCULA · MINÚSCULA",
 ];
 
 interface FormulaPreview {

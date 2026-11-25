@@ -6,8 +6,14 @@ Sintaxe suportada (separador de argumentos: ponto e vírgula):
 - Textos: "entre aspas"
 - Operadores: + - * /  (com parênteses), e comparações = <> < > <= >= (resultado VERDADEIRO/FALSO)
 - Funções numéricas: SOMA(a;b;...), MEDIA(a;...), MIN(a;...), MAX(a;...), CONTAR(a;...)
-- Lógica: SE(condição; valor_se_verdadeiro; valor_se_falso)
-- Texto: CONCAT(a;b;...), MAIUSC(t), MINUSC(t), ESQUERDA(t;n), DIREITA(t;n)
+  com nomes em português completos: MÉDIA, MÍNIMO, MÁXIMO, CONTAGEM (aliases aceitos).
+- Numéricas adicionais: ABS(n), ARRED(n;casas) (meio para cima, a partir de zero)
+- Lógica: SE(condição; valor_se_verdadeiro; valor_se_falso), E(a;...), OU(a;...)
+- Erros: SEERRO(valor; alternativo): avalia o alternativo só quando o valor é um erro explícito
+- Texto: CONCAT(a;b;...) ou CONCATENAR, MAIUSC(t) ou MAIÚSCULA, MINUSC(t) ou MINÚSCULA,
+  ESQUERDA(t;n), DIREITA(t;n), ARRUMAR(t) (remove espaços das pontas e repetidos), NUM.CARACT(t)
+
+Precisão decimal: todos os números são Decimal; ARRED não passa por float.
 
 Erros são explícitos e aparecem na célula, nunca viram zero silenciosamente:
 #VAZIO! (vazio em conta), #DESCONHECIDO! (desconhecido em conta), #VALOR! (texto em conta numérica),
@@ -19,7 +25,7 @@ from __future__ import annotations
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from engiflow_api.domain.numeric import format_decimal, parse_decimal
@@ -84,7 +90,8 @@ def _tokenize(source: str) -> list[_Token]:
             continue
         if ch.isalpha():
             j = i
-            while j < len(source) and (source[j].isalnum() or source[j] == "_"):
+            # Ponto faz parte do nome de função (NUM.CARACT), nunca começa um nome.
+            while j < len(source) and (source[j].isalnum() or source[j] in "_."):
                 j += 1
             tokens.append(_Token("IDENT", source[i:j]))
             i = j
@@ -102,6 +109,22 @@ def _name(text: str) -> str:
     """Nome de função sem acento e em maiúsculas: MÉDIA, Media e MEDIA são a mesma função."""
     decomposed = unicodedata.normalize("NFKD", text)
     return "".join(c for c in decomposed if not unicodedata.combining(c)).upper()
+
+
+# Aliases em português completo, já sem acento. Cada um aponta para a função canônica existente.
+_ALIASES = {
+    "MINIMO": "MIN",
+    "MAXIMO": "MAX",
+    "CONTAGEM": "CONTAR",
+    "CONCATENAR": "CONCAT",
+    "MAIUSCULA": "MAIUSC",
+    "MINUSCULA": "MINUSC",
+}
+
+
+def _canonical(text: str) -> str:
+    name = _name(text)
+    return _ALIASES.get(name, name)
 
 
 # AST como tuplas simples: ("num", Decimal) | ("str", s) | ("ref", nome) | ("neg", x)
@@ -172,6 +195,12 @@ class _Parser:
         if token.kind == "REF":
             return ("ref", token.text)
         if token.kind == "IDENT":
+            # VERDADEIRO e FALSO são constantes lógicas (sem parênteses).
+            name = _name(token.text)
+            if name in ("VERDADEIRO", "FALSO") and not (
+                self.peek().kind == "OP" and self.peek().text == "("
+            ):
+                return ("bool", name == "VERDADEIRO")
             self.expect_op("(")
             args: list[Any] = []
             if not (self.peek().kind == "OP" and self.peek().text == ")"):
@@ -180,7 +209,7 @@ class _Parser:
                     self.take()
                     args.append(self.comparison())
             self.expect_op(")")
-            return ("call", _name(token.text), args)
+            return ("call", _canonical(token.text), args)
         if token.kind == "OP" and token.text == "(":
             node = self.comparison()
             self.expect_op(")")
@@ -353,6 +382,31 @@ def _call(name: str, args: list[Value]) -> Value:
             return Err(ERR_VALUE)
         n = int(count)
         return text[:n] if name == "ESQUERDA" else (text[len(text) - n :] if n else "")
+    if name in ("E", "OU"):
+        # Lógica estrita: só VERDADEIRO/FALSO. Número ou texto é #VALOR! (sem conversão silenciosa).
+        if not args or any(not isinstance(a, bool) for a in args):
+            return Err(ERR_VALUE)
+        return all(args) if name == "E" else any(args)
+    if name == "ABS":
+        number = _number(args[0]) if len(args) == 1 else Err(ERR_VALUE)
+        return number if isinstance(number, Err) else abs(number)
+    if name == "ARRED":
+        if len(args) not in (1, 2):
+            return Err(ERR_VALUE)
+        number = _number(args[0])
+        if isinstance(number, Err):
+            return number
+        places = Decimal(0) if len(args) == 1 else _number(args[1])
+        if isinstance(places, Err) or places != places.to_integral_value() or abs(places) > 15:
+            return Err(ERR_VALUE)
+        # Meio para cima, a partir de zero (como o Excel). Decimal, sem float.
+        return number.quantize(Decimal(1).scaleb(-int(places)), rounding=ROUND_HALF_UP)
+    if name == "ARRUMAR":
+        text = _text(args[0]) if len(args) == 1 else Err(ERR_VALUE)
+        return text if isinstance(text, Err) else " ".join(text.split())
+    if name == "NUM.CARACT":
+        text = _text(args[0]) if len(args) == 1 else Err(ERR_VALUE)
+        return text if isinstance(text, Err) else Decimal(len(text))
     return Err(ERR_SYNTAX)
 
 
@@ -364,6 +418,9 @@ def _evaluate(node: Any, row: Mapping[str, str | None]) -> Value:
     if kind == "str":
         text: str = node[1]
         return text
+    if kind == "bool":
+        flag: bool = node[1]
+        return flag
     if kind == "ref":
         column: str = node[1]
         cell: str | None = row.get(column)
@@ -382,6 +439,10 @@ def _evaluate(node: Any, row: Mapping[str, str | None]) -> Value:
             if isinstance(condition, Err) or not isinstance(condition, bool):
                 return condition if isinstance(condition, Err) else Err(ERR_VALUE)
             return _evaluate(node[2][1] if condition else node[2][2], row)
+        # SEERRO: só avalia o alternativo quando o valor é um erro explícito (qualquer código).
+        if node[1] == "SEERRO" and len(node[2]) == 2:
+            first: Value = _evaluate(node[2][0], row)
+            return _evaluate(node[2][1], row) if isinstance(first, Err) else first
         return _call(node[1], [_evaluate(arg, row) for arg in node[2]])
     return Err(ERR_SYNTAX)
 
