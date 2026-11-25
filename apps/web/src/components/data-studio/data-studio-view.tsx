@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -59,69 +59,84 @@ export function DataStudioView() {
   }, [datasets.error, router]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
-      <header>
-        <p className="text-sm text-[var(--color-muted)]">EngiFlow</p>
-        <h1 className="text-2xl font-semibold">Data Studio</h1>
-        <p className="text-sm text-[var(--color-muted)]">
-          Importe CSV ou XLSX, mapeie colunas e revise códigos e duplicatas. Nada é alterado
-          automaticamente.
-        </p>
+    <div className="mx-auto max-w-[1600px] space-y-4 p-4 md:p-6">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="text-xl font-semibold">Data Studio</h1>
+        <p className="text-xs text-[var(--color-muted)]">Nada é alterado automaticamente.</p>
       </header>
 
-      <UploadSection
-        onImported={(id) => {
-          setSelectedId(id);
-          void queryClient.invalidateQueries({ queryKey: ["datasets"] });
-        }}
-      />
+      <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
+        <aside className="min-w-0 space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+          <UploadSection
+            onImported={(id) => {
+              setSelectedId(id);
+              void queryClient.invalidateQueries({ queryKey: ["datasets"] });
+            }}
+          />
 
-      <section className={sectionClass} aria-labelledby="tabelas">
-        <h2 id="tabelas" className="font-medium">
-          Tabelas importadas
-        </h2>
-        {datasets.isPending ? <p className="text-sm text-[var(--color-muted)]">Carregando…</p> : null}
-        {datasets.isError ? (
-          <p role="alert" className="text-sm text-[var(--color-danger)]">
-            {errorMessage(datasets.error)}
-          </p>
-        ) : null}
-        {datasets.data && datasets.data.length === 0 ? (
-          <p className="text-sm text-[var(--color-muted)]">Nenhuma tabela importada ainda.</p>
-        ) : null}
-        {datasets.data && datasets.data.length > 0 ? (
-          <ul className="divide-y divide-[var(--color-border)]">
-            {datasets.data.map((d) => (
-              <li key={d.id} className="flex items-center justify-between gap-2 py-2">
-                <span className="text-sm">
-                  <strong>{d.name}</strong>
-                  <span className="text-[var(--color-muted)]">
-                    {" "}
-                    · {d.row_count} linhas · {d.columns.length} colunas
-                    {d.sheet_name ? ` · aba ${d.sheet_name}` : ""}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(d.id)}
-                  className="rounded-md border border-[var(--color-border)] px-3 py-1 text-sm"
-                  aria-pressed={selectedId === d.id}
-                >
-                  Abrir
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </section>
+          <section className={sectionClass} aria-labelledby="tabelas">
+            <h2 id="tabelas" className="font-medium">
+              Tabelas importadas
+            </h2>
+            {datasets.isPending ? (
+              <p className="text-sm text-[var(--color-muted)]">Carregando…</p>
+            ) : null}
+            {datasets.isError ? (
+              <p role="alert" className="text-sm text-[var(--color-danger)]">
+                {errorMessage(datasets.error)}
+              </p>
+            ) : null}
+            {datasets.data && datasets.data.length === 0 ? (
+              <p className="text-sm text-[var(--color-muted)]">Nenhuma tabela importada ainda.</p>
+            ) : null}
+            {datasets.data && datasets.data.length > 0 ? (
+              <ul className="divide-y divide-[var(--color-border)]">
+                {datasets.data.map((d) => (
+                  <li key={d.id} className="flex items-center justify-between gap-2 py-2">
+                    <span className="min-w-0 text-sm">
+                      <strong className="block truncate">{d.name}</strong>
+                      <span className="text-xs text-[var(--color-muted)]">
+                        {d.row_count} linhas · {d.columns.length} colunas
+                        {d.sheet_name ? ` · aba ${d.sheet_name}` : ""}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(d.id)}
+                      className="shrink-0 rounded-md border border-[var(--color-border)] px-3 py-1 text-sm"
+                      aria-pressed={selectedId === d.id}
+                    >
+                      Abrir
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
 
-      <DeletedTablesSection />
+          <DeletedTablesSection />
 
-      {selectedId ? (
-        <DatasetPanel datasetId={selectedId} onDeleted={() => setSelectedId(null)} />
-      ) : null}
+          <details open className={sectionClass}>
+            <summary className="cursor-pointer font-medium">Comparar códigos entre tabelas</summary>
+            <div className="pt-3">
+              <CompareSection datasets={datasets.data ?? []} />
+            </div>
+          </details>
+        </aside>
 
-      <CompareSection datasets={datasets.data ?? []} />
+        <main className="min-w-0 space-y-6">
+          {selectedId ? (
+            <DatasetPanel datasetId={selectedId} onDeleted={() => setSelectedId(null)} />
+          ) : (
+            <section className={sectionClass}>
+              <h2 className="font-medium">Nenhuma tabela aberta</h2>
+              <p className="text-sm text-[var(--color-muted)]">
+                Importe um arquivo CSV ou XLSX, ou escolha uma tabela na lista à esquerda.
+              </p>
+            </section>
+          )}
+        </main>
+      </div>
     </div>
   );
 }
@@ -160,7 +175,7 @@ function UploadSection({ onImported }: { onImported: (id: string) => void }) {
       <h2 id="importar" className="font-medium">
         Importar arquivo
       </h2>
-      <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <div className="flex-1 space-y-1">
           <label htmlFor="arquivo" className="block text-sm font-medium">
             Arquivo (.csv ou .xlsx)
@@ -223,26 +238,21 @@ function DatasetPanel({ datasetId, onDeleted }: { datasetId: string; onDeleted: 
     );
   };
 
+  const sheetInfo = data.sheet_name ? ` · aba ${data.sheet_name}` : "";
   return (
-    <div className="space-y-6">
-      <MappingSection
-        key={datasetId}
-        datasetId={datasetId}
-        columns={data.columns}
-        initial={data.mapping}
-        onSaved={onSaved}
-      />
-
-      <HistoryPanel datasetId={datasetId} />
-
-      <TableAdminSection datasetId={datasetId} name={data.name} onDeleted={onDeleted} />
-
-      <HeaderSection datasetId={datasetId} />
-
-      <TemplatesSection
-        datasetId={datasetId}
-        onApplied={() => void queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] })}
-      />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[var(--color-border)] pb-2">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-semibold">{data.name}</h2>
+          <p className="text-xs text-[var(--color-muted)]">
+            {data.row_count} linhas · {data.columns.length} colunas{sheetInfo}
+          </p>
+        </div>
+        <ExportButtons
+          label="Exportar"
+          onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}
+        />
+      </div>
 
       {data.warnings.length > 0 ? (
         <section className={sectionClass} aria-labelledby="avisos">
@@ -259,13 +269,51 @@ function DatasetPanel({ datasetId, onDeleted }: { datasetId: string; onDeleted: 
 
       <DataTable datasetId={datasetId} columns={data.columns} />
 
-      <ReplaceSection datasetId={datasetId} columns={data.columns} />
-      <ExportButtons
-        label="Exportar tabela"
-        onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}
-      />
+      <details open className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Transformar: localizar e substituir</summary>
+        <div className="pt-3">
+          <ReplaceSection datasetId={datasetId} columns={data.columns} />
+        </div>
+      </details>
 
-      <DuplicatesSection datasetId={datasetId} hasCodeMapping={Boolean(data.mapping.code)} />
+      <details open className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Histórico e desfazer</summary>
+        <div className="pt-3">
+          <HistoryPanel datasetId={datasetId} />
+        </div>
+      </details>
+
+      <details className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Mapeamento, cabeçalho e modelos</summary>
+        <div className="space-y-6 pt-3">
+          <MappingSection
+            key={datasetId}
+            datasetId={datasetId}
+            columns={data.columns}
+            initial={data.mapping}
+            onSaved={onSaved}
+          />
+          <HeaderSection datasetId={datasetId} />
+          <TemplatesSection
+            datasetId={datasetId}
+            onApplied={() => void queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] })}
+          />
+        </div>
+      </details>
+
+      <details className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Gerenciar tabela</summary>
+        <div className="pt-3">
+          <TableAdminSection datasetId={datasetId} name={data.name} onDeleted={onDeleted} />
+        </div>
+      </details>
+
+      <details className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Duplicatas e semelhanças</summary>
+        <div className="pt-3">
+          <DuplicatesSection datasetId={datasetId} hasCodeMapping={Boolean(data.mapping.code)} />
+        </div>
+      </details>
     </div>
   );
 }

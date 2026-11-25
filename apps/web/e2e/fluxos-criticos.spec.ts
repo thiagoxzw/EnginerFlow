@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+﻿import { fileURLToPath } from "node:url";
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -36,17 +36,19 @@ test("modelo com colunas ausentes exige confirmação antes de aplicar parcialme
   page,
 }) => {
   await importAndOpen(page, "SYN-tpl.csv", "SYN-tpl");
+  await page.getByText("Mapeamento, cabeçalho e modelos", { exact: true }).click();
   const modelos = page.getByRole("region", { name: "Modelos de mapeamento" });
+  const nomeModelo = "Modelo parcial " + Date.now();
 
   // Cria modelo com uma coluna que não existe na tabela.
-  await modelos.locator("#tpl-name").fill("Modelo parcial");
+  await modelos.locator("#tpl-name").fill(nomeModelo);
   await modelos.locator("#tpl-code").fill("SYN-Código");
   await modelos.locator("#tpl-unit").fill("Unidade-inexistente");
   await modelos.getByRole("button", { name: "Criar modelo" }).click();
   await expect(modelos.getByRole("status")).toContainText("Modelo criado");
 
   // Seleciona o modelo e pré-visualiza: a coluna ausente aparece e não há aplicação ainda.
-  await modelos.locator("#tpl-select").selectOption({ label: "Modelo parcial (v1)" });
+  await modelos.locator("#tpl-select").selectOption(await modelos.locator("#tpl-select").locator("option", { hasText: nomeModelo }).getAttribute("value") ?? "");
   await modelos.getByRole("button", { name: "Pré-visualizar aplicação" }).click();
   await expect(modelos.getByRole("alert")).toContainText("Unidade-inexistente");
   await expect(modelos.getByRole("button", { name: "Aplicar modelo" })).toHaveCount(0);
@@ -63,6 +65,7 @@ test("modelo com colunas ausentes exige confirmação antes de aplicar parcialme
 
 test("seleção manual de cabeçalho reconstrói a tabela a partir do original", async ({ page }) => {
   await importAndOpen(page, "SYN-cab.csv", "SYN-cab");
+  await page.getByText("Mapeamento, cabeçalho e modelos", { exact: true }).click();
   const cabecalho = page.getByRole("region", { name: "Cabeçalho" });
 
   await cabecalho.getByRole("button", { name: "Usar a linha 2 como cabeçalho" }).click();
@@ -92,6 +95,7 @@ test("exclusão e desfazer de linhas selecionadas", async ({ page }) => {
 
 test("excluir e restaurar tabela com confirmação do nome exato", async ({ page }) => {
   await importAndOpen(page, "SYN-del.csv", "SYN-del");
+  await page.locator("summary", { hasText: "Gerenciar tabela" }).click();
   const gerenciar = page.getByRole("region", { name: "Gerenciar tabela" });
   const excluir = gerenciar.getByRole("button", { name: "Excluir tabela" });
   await expect(excluir).toBeDisabled();
