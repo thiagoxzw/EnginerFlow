@@ -2,6 +2,7 @@
 
 import argparse
 import getpass
+import os
 import sys
 
 from engiflow_api.application.auth import create_user
@@ -15,13 +16,19 @@ def main(argv: list[str] | None = None) -> int:
     create = sub.add_parser("create-user", help="cria o único usuário (falha se já existir)")
     create.add_argument("--email", required=True)
     create.add_argument("--name", required=True)
+    # Somente para automação de teste (CI): lê a senha de uma variável de ambiente.
+    # O nome da variável é passado por argumento; o valor nunca é impresso.
+    create.add_argument("--password-env", default=None, metavar="VAR")
     args = parser.parse_args(argv)
 
     if args.command == "create-user":
-        password = getpass.getpass("Senha (mínimo 12 caracteres): ")
-        if password != getpass.getpass("Repita a senha: "):
-            print("As senhas não conferem.", file=sys.stderr)
-            return 1
+        if args.password_env:
+            password = os.environ.get(args.password_env, "")
+        else:
+            password = getpass.getpass("Senha (mínimo 12 caracteres): ")
+            if password != getpass.getpass("Repita a senha: "):
+                print("As senhas não conferem.", file=sys.stderr)
+                return 1
         factory = build_session_factory(build_engine(get_settings().database_url))
         with factory() as db:
             try:

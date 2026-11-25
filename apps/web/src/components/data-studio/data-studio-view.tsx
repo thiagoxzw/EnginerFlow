@@ -5,6 +5,15 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError } from "@/lib/api";
+import { DataTable } from "@/components/data-studio/data-table";
+import { HeaderSection } from "@/components/data-studio/header-section";
+import { HistoryPanel } from "@/components/data-studio/history-panel";
+import {
+  DeletedTablesSection,
+  TableAdminSection,
+} from "@/components/data-studio/table-admin";
+import { ReplaceSection } from "@/components/data-studio/replace-section";
+import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
   CANONICAL_FIELDS,
   EXPORT_COMPARE_PATH,
@@ -106,7 +115,11 @@ export function DataStudioView() {
         ) : null}
       </section>
 
-      {selectedId ? <DatasetPanel datasetId={selectedId} /> : null}
+      <DeletedTablesSection />
+
+      {selectedId ? (
+        <DatasetPanel datasetId={selectedId} onDeleted={() => setSelectedId(null)} />
+      ) : null}
 
       <CompareSection datasets={datasets.data ?? []} />
     </div>
@@ -186,7 +199,7 @@ function UploadSection({ onImported }: { onImported: (id: string) => void }) {
   );
 }
 
-function DatasetPanel({ datasetId }: { datasetId: string }) {
+function DatasetPanel({ datasetId, onDeleted }: { datasetId: string; onDeleted: () => void }) {
   const queryClient = useQueryClient();
   const detail = useQuery({
     queryKey: ["dataset", datasetId],
@@ -220,6 +233,17 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
         onSaved={onSaved}
       />
 
+      <HistoryPanel datasetId={datasetId} />
+
+      <TableAdminSection datasetId={datasetId} name={data.name} onDeleted={onDeleted} />
+
+      <HeaderSection datasetId={datasetId} />
+
+      <TemplatesSection
+        datasetId={datasetId}
+        onApplied={() => void queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] })}
+      />
+
       {data.warnings.length > 0 ? (
         <section className={sectionClass} aria-labelledby="avisos">
           <h2 id="avisos" className="font-medium">
@@ -233,36 +257,9 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
         </section>
       ) : null}
 
-      <section className={sectionClass} aria-labelledby="previa">
-        <h2 id="previa" className="font-medium">
-          Prévia (primeiras {data.preview.length} linhas)
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-[var(--color-muted)]">
-              <tr>
-                {data.columns.map((c) => (
-                  <th key={c} className="px-2 py-1 font-medium">
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.preview.map((row, index) => (
-                <tr key={index} className="border-t border-[var(--color-border)]">
-                  {data.columns.map((c) => (
-                    <td key={c} className="px-2 py-1 font-mono text-xs">
-                      {row[c] ?? ""}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <DataTable datasetId={datasetId} columns={data.columns} />
 
+      <ReplaceSection datasetId={datasetId} columns={data.columns} />
       <ExportButtons
         label="Exportar tabela"
         onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}

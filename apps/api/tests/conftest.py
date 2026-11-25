@@ -88,4 +88,7 @@ def storage_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Setting
         max_rows=500_000,
     )
     monkeypatch.setattr("engiflow_api.presentation.routes.datasets.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "engiflow_api.presentation.routes.operations.get_settings", lambda: settings
+    )
     return settings

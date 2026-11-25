@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import uuid
 from datetime import datetime
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Form, Query, Request, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
@@ -20,11 +21,16 @@ from engiflow_api.application.data_studio import (
     find_duplicates,
     get_dataset,
     import_upload,
+    rename_dataset,
+    restore_dataset,
     set_mapping,
+    soft_delete_dataset,
     sweep_stale_temp_files,
 )
+from engiflow_api.application.table_query import matching_row_numbers, query_page
 from engiflow_api.core.config import get_settings
 from engiflow_api.domain.errors import DomainError
+from engiflow_api.domain.query import MAX_SEARCH, FilterIn, TableQuery
 from engiflow_api.domain.tabular import CodeComparison
 from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
 from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
@@ -210,9 +216,62 @@ def upload(
 
 
 @router.get("", response_model=list[DatasetSummary])
-def list_datasets(user: CurrentUser, db: DbDep) -> list[DatasetSummary]:
-    rows = db.scalars(select(Dataset).order_by(Dataset.created_at.desc()).limit(200)).all()
+def list_datasets(
+    user: CurrentUser,
+    db: DbDep,
+    deleted: Annotated[bool, Query()] = False,
+) -> list[DatasetSummary]:
+    """Tabelas ativas por padrão; com `deleted=true`, as excluídas logicamente."""
+    condition = Dataset.deleted_at.is_not(None) if deleted else Dataset.deleted_at.is_(None)
+    rows = db.scalars(
+        select(Dataset).where(condition).order_by(Dataset.created_at.desc()).limit(200)
+    ).all()
     return [_summary(d) for d in rows]
+
+
+class RenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class DeleteIn(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=255)
+
+
+@router.patch("/{dataset_id}", response_model=DatasetSummary)
+def rename(
+    dataset_id: str, payload: RenameIn, request: Request, user: CurrentUser, db: DbDep
+) -> DatasetSummary:
+    dataset = get_dataset(db, dataset_id)
+    rename_dataset(
+        db, dataset, payload.name, actor=user.email, correlation_id=_correlation(request)
+    )
+    db.commit()
+    return _summary(dataset)
+
+
+@router.delete("/{dataset_id}", response_model=DatasetSummary)
+def delete(
+    dataset_id: str, payload: DeleteIn, request: Request, user: CurrentUser, db: DbDep
+) -> DatasetSummary:
+    """Exclusão lógica: exige o nome exato. A tabela pode ser restaurada."""
+    dataset = get_dataset(db, dataset_id)
+    soft_delete_dataset(
+        db,
+        dataset,
+        payload.confirm_name,
+        actor=user.email,
+        correlation_id=_correlation(request),
+    )
+    db.commit()
+    return _summary(dataset)
+
+
+@router.post("/{dataset_id}/restore", response_model=DatasetSummary)
+def restore(dataset_id: str, request: Request, user: CurrentUser, db: DbDep) -> DatasetSummary:
+    dataset = get_dataset(db, dataset_id, include_deleted=True)
+    restore_dataset(db, dataset, actor=user.email, correlation_id=_correlation(request))
+    db.commit()
+    return _summary(dataset)
 
 
 @router.get("/{dataset_id}", response_model=DatasetDetail)
@@ -229,6 +288,22 @@ def detail(dataset_id: str, user: CurrentUser, db: DbDep) -> DatasetDetail:
     return DatasetDetail(**base, preview=preview)
 
 
+def _parse_filters(raw: str | None) -> list[FilterIn]:
+    """Filtros chegam como JSON na query string. Qualquer formato inválido vira erro de regra."""
+    if not raw:
+        return []
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise DomainError("Filtros em formato JSON inválido.") from exc
+    if not isinstance(items, list):
+        raise DomainError("Filtros devem ser uma lista.")
+    try:
+        return [FilterIn.model_validate(item) for item in items]
+    except ValidationError as exc:
+        raise DomainError("Filtro inválido.") from exc
+
+
 @router.get("/{dataset_id}/rows", response_model=RowsOut)
 def rows(
     dataset_id: str,
@@ -236,8 +311,28 @@ def rows(
     db: DbDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    q: Annotated[str, Query(max_length=MAX_SEARCH)] = "",
+    filters: Annotated[str | None, Query(max_length=8000)] = None,
+    sort: Annotated[str | None, Query(max_length=255)] = None,
+    dir: Annotated[Literal["asc", "desc"], Query()] = "asc",
 ) -> RowsOut:
+    """Linhas da versão atual. Sem filtro/pesquisa/ordenação usa a leitura direta por página."""
     dataset = get_dataset(db, dataset_id)
+    query = TableQuery(
+        filters=_parse_filters(filters),
+        search=q,
+        sort_column=sort,
+        descending=dir == "desc",
+    )
+    if not query.is_plain():
+        total, page_rows = query_page(db, dataset, query, offset=offset, limit=limit)
+        return RowsOut(
+            total=total,
+            offset=offset,
+            limit=limit,
+            columns=list(dataset.columns),
+            rows=[RowOut(row_number=n, values=list(v)) for n, v in page_rows],
+        )
     total = (
         db.scalar(
             select(func.count())
@@ -260,6 +355,27 @@ def rows(
         columns=list(dataset.columns),
         rows=[RowOut(row_number=n, values=list(v)) for n, v in page],
     )
+
+
+class SelectionIn(BaseModel):
+    q: str = Field(default="", max_length=MAX_SEARCH)
+    filters: list[FilterIn] = Field(default_factory=list, max_length=20)
+
+
+class SelectionOut(BaseModel):
+    count: int
+    row_numbers: list[int]
+
+
+@router.post("/{dataset_id}/rows/selection", response_model=SelectionOut)
+def select_rows(
+    dataset_id: str, payload: SelectionIn, user: CurrentUser, db: DbDep
+) -> SelectionOut:
+    """Números das linhas que casam com filtros e pesquisa (para ações em lote)."""
+    dataset = get_dataset(db, dataset_id)
+    query = TableQuery(filters=list(payload.filters), search=payload.q)
+    numbers = matching_row_numbers(db, dataset, query)
+    return SelectionOut(count=len(numbers), row_numbers=numbers)
 
 
 @router.put("/{dataset_id}/mapping", response_model=DatasetSummary)

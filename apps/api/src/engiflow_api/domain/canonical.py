@@ -1,13 +1,16 @@
-"""Hash canônico do conteúdo lógico de uma tabela (2B.1, §5.1 do planejamento).
+"""Hashes canônicos e determinísticos (2B.2, §5 do planejamento).
 
-Regras:
-- Serialização JSON com separadores fixos, sem espaços, chaves ordenadas e UTF-8 sem escape.
-- Strings em Unicode NFC. Desconhecido = null; vazio = ""; zero = "0" (são estados distintos).
-- Inclui nomes de colunas, valores e a versão do esquema. Não inclui ids, datas, nomes de arquivo.
-- Calculado em streaming (linha a linha), sem montar o conteúdo inteiro em memória.
+Duas grandezas, separadas por finalidade:
+- `rows_sha256`: conteúdo lógico das LINHAS de uma versão de dados. Não inclui nomes de colunas,
+  para que uma renomeação (metadado) não altere o hash dos dados.
+- `metadata_sha256`: colunas, mapeamento e linha de cabeçalho de uma versão de metadados.
 
-Este hash identifica o CONTEÚDO. O hash de um arquivo exportado (XLSX/CSV) é outra grandeza:
-ele depende de metadados do formato e não deve ser usado para comparar conteúdo.
+Regras de serialização:
+- JSON com separadores fixos, sem espaços, chaves ordenadas e UTF-8 sem escape.
+- Strings em Unicode NFC. Desconhecido = null; vazio = ""; zero = "0" (estados distintos).
+- Calculado em streaming. Não inclui ids, datas, nomes de arquivo nem ordem de inserção.
+
+O hash do ARQUIVO exportado (XLSX/CSV) é outra grandeza e não é usado para comparar conteúdo.
 """
 
 from __future__ import annotations
@@ -15,9 +18,10 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
-SCHEMA_VERSION = 1
+ROWS_SCHEMA = "rows-v1"
+METADATA_SCHEMA = "metadata-v1"
 
 
 def _nfc(value: str) -> str:
@@ -28,13 +32,12 @@ def _dump(obj: object) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
-class CanonicalHasher:
-    """Acumula linhas em streaming e produz o SHA-256 do conteúdo lógico."""
+class RowsHasher:
+    """Acumula linhas em streaming e produz o SHA-256 do conteúdo das linhas."""
 
-    def __init__(self, columns: Sequence[str]) -> None:
+    def __init__(self) -> None:
         self._hasher = hashlib.sha256()
-        header = {"schema": SCHEMA_VERSION, "columns": [_nfc(c) for c in columns]}
-        self._hasher.update((_dump(header) + "\n").encode("utf-8"))
+        self._hasher.update((_dump({"schema": ROWS_SCHEMA}) + "\n").encode("utf-8"))
         self.row_count = 0
 
     def add_row(self, values: Sequence[str | None]) -> None:
@@ -46,8 +49,20 @@ class CanonicalHasher:
         return self._hasher.copy().hexdigest()
 
 
-def content_sha256(columns: Sequence[str], rows: Iterable[Sequence[str | None]]) -> str:
-    hasher = CanonicalHasher(columns)
+def rows_sha256(rows: Iterable[Sequence[str | None]]) -> str:
+    hasher = RowsHasher()
     for row in rows:
         hasher.add_row(row)
     return hasher.hexdigest()
+
+
+def metadata_sha256(
+    columns: Sequence[str], mapping: Mapping[str, str], header_row: int | None
+) -> str:
+    payload = {
+        "schema": METADATA_SCHEMA,
+        "columns": [_nfc(c) for c in columns],
+        "mapping": {_nfc(k): _nfc(v) for k, v in mapping.items()},
+        "header_row": header_row,
+    }
+    return hashlib.sha256(_dump(payload).encode("utf-8")).hexdigest()

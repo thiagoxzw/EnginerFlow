@@ -29,7 +29,7 @@ from engiflow_api.application.operations.registry import (
     validate_params,
 )
 from engiflow_api.core.config import Settings, get_settings
-from engiflow_api.domain.canonical import CanonicalHasher, content_sha256
+from engiflow_api.domain.canonical import RowsHasher, metadata_sha256, rows_sha256
 from engiflow_api.domain.errors import ConflictError, DomainError
 from engiflow_api.infrastructure.models import (
     Base,
@@ -47,44 +47,45 @@ SYN_CSV = (
 # ---------- hash canônico ----------
 
 
-def test_canonical_hash_is_stable_and_pinned() -> None:
-    """Vetor fixo: qualquer mudança de serialização quebra este teste de propósito."""
-    expected_bytes = (
-        '{"columns":["Código","Qtd"],"schema":1}\n["00123","1"]\n["0",null]\n["","7"]\n'
-    ).encode()
+def test_rows_hash_is_stable_and_pinned() -> None:
+    """Vetor fixo (rows-v1): qualquer mudança de serialização quebra este teste de propósito."""
+    expected_bytes = b'{"schema":"rows-v1"}\n["00123","1"]\n["0",null]\n["","7"]\n'
     expected = hashlib.sha256(expected_bytes).hexdigest()
-    assert content_sha256(["Código", "Qtd"], [["00123", "1"], ["0", None], ["", "7"]]) == expected
+    assert rows_sha256([["00123", "1"], ["0", None], ["", "7"]]) == expected
 
 
-def test_canonical_distinguishes_unknown_empty_and_zero() -> None:
-    cols = ["Qtd"]
-    unknown = content_sha256(cols, [[None]])
-    empty = content_sha256(cols, [[""]])
-    zero = content_sha256(cols, [["0"]])
+def test_rows_hash_distinguishes_unknown_empty_and_zero() -> None:
+    unknown = rows_sha256([[None]])
+    empty = rows_sha256([[""]])
+    zero = rows_sha256([["0"]])
     assert len({unknown, empty, zero}) == 3
 
 
-def test_canonical_hash_changes_with_column_name_and_value() -> None:
-    base = content_sha256(["A"], [["1"]])
-    assert content_sha256(["B"], [["1"]]) != base
-    assert content_sha256(["A"], [["2"]]) != base
+def test_rows_hash_ignores_names_and_metadata_hash_tracks_them() -> None:
+    """Renomear coluna é metadado: o hash das linhas não muda; o de metadados muda."""
+    assert metadata_sha256(["A"], {}, None) != metadata_sha256(["B"], {}, None)
+    assert metadata_sha256(["A"], {"code": "A"}, None) != metadata_sha256(["A"], {}, None)
+    assert metadata_sha256(["A"], {}, 2) != metadata_sha256(["A"], {}, None)
+
+
+def test_rows_hash_changes_with_value() -> None:
+    base = rows_sha256([["1"]])
+    assert rows_sha256([["2"]]) != base
 
 
 def test_canonical_normalizes_unicode_nfc() -> None:
     decomposed = "Ac\u0327a\u0303o"  # "Ação" em NFD
     composed = "A\u00e7\u00e3o"  # "Ação" em NFC
     assert decomposed != composed
-    assert content_sha256(["Descrição"], [[decomposed]]) == content_sha256(
-        ["Descrição"], [[composed]]
-    )
+    assert rows_sha256([[decomposed]]) == rows_sha256([[composed]])
 
 
 def test_streaming_hasher_matches_one_shot() -> None:
     rows: list[list[str | None]] = [["00123", "a"], ["0", None]]
-    hasher = CanonicalHasher(["C", "D"])
+    hasher = RowsHasher()
     for row in rows:
         hasher.add_row(row)
-    assert hasher.hexdigest() == content_sha256(["C", "D"], rows)
+    assert hasher.hexdigest() == rows_sha256(rows)
 
 
 # ---------- registro e operações puras ----------
@@ -98,8 +99,16 @@ def _snap() -> Snapshot:
     )
 
 
-def test_registry_lists_the_three_minimal_operations() -> None:
-    assert set(OPERATIONS) == {"rename_column", "replace_text", "set_rows_value"}
+def test_registry_lists_the_minimal_operations() -> None:
+    assert set(OPERATIONS) == {
+        "rename_column",
+        "set_mapping",
+        "apply_mapping_template",
+        "set_header_row",
+        "delete_rows",
+        "replace_text",
+        "set_rows_value",
+    }
     with pytest.raises(DomainError, match="desconhecida"):
         get_operation("eval_python")
 
@@ -226,7 +235,15 @@ def test_catalog_endpoint_exposes_schemas(
 ) -> None:
     body = logged_client.get("/api/v1/operations/catalog").json()
     codes = {item["code"] for item in body}
-    assert codes == {"rename_column", "replace_text", "set_rows_value"}
+    assert codes == {
+        "rename_column",
+        "set_mapping",
+        "apply_mapping_template",
+        "set_header_row",
+        "delete_rows",
+        "replace_text",
+        "set_rows_value",
+    }
     assert all("properties" in item["params_schema"] for item in body)
 
 
@@ -237,8 +254,7 @@ def test_import_creates_version_one_with_content_hash(
     versions = _versions(logged_client, ds["id"])
     assert len(versions) == 1
     assert versions[0]["number"] == 1 and versions[0]["is_current"] is True
-    assert versions[0]["content_sha256"] == content_sha256(
-        ds["columns"],
+    assert versions[0]["content_sha256"] == rows_sha256(
         [["00123", "SYN parafuso", "1"], ["0123", "SYN porca", ""], ["AB1", "SYN arruela", "7"]],
     )
 
@@ -309,7 +325,8 @@ def test_stale_base_is_a_conflict_and_nothing_changes(
     assert _apply(logged_client, ds["id"], prev["preview_id"], base).status_code == 201
     stale = _apply(logged_client, ds["id"], prev2["preview_id"], base)
     assert stale.status_code == 409
-    assert len(_versions(logged_client, ds["id"])) == 2
+    # Renomear é metadado: a versão de dados continua a mesma (sem cópia de linhas).
+    assert len(_versions(logged_client, ds["id"])) == 1
 
 
 def test_idempotency_key_replays_the_same_result(
@@ -367,7 +384,11 @@ def test_undo_with_stale_base_and_nothing_to_undo(
     nothing = logged_client.post(f"/api/v1/datasets/{ds['id']}/undo", json={"base_version_id": v1})
     assert nothing.status_code == 422
     prev = _preview(
-        logged_client, ds["id"], "rename_column", {"from_name": "Qtd", "to_name": "Q"}, v1
+        logged_client,
+        ds["id"],
+        "set_rows_value",
+        {"row_numbers": [2], "column": "Qtd", "value": "9"},
+        v1,
     )
     v2 = _apply(logged_client, ds["id"], prev["preview_id"], v1).json()["current_version_id"]
     stale = logged_client.post(f"/api/v1/datasets/{ds['id']}/undo", json={"base_version_id": v1})
@@ -659,7 +680,7 @@ def test_migration_0003_preserves_existing_rows_and_hash(
                 .all()
             )
         assert meta_ids and all(len(i) <= 36 for i in meta_ids)
-        assert stored_sha == content_sha256(columns, rows)
+        assert stored_sha == rows_sha256(rows)
         assert [(n, v) for n, v in migrated] == [(i + 2, r) for i, r in enumerate(rows)]
         engine.dispose()
 

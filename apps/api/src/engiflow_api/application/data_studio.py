@@ -15,15 +15,21 @@ import time
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.application.audit import record_event
-from engiflow_api.domain.canonical import CanonicalHasher
+from engiflow_api.application.versioning import (
+    apply_preview,
+    create_preview,
+    current_state,
+)
+from engiflow_api.domain.canonical import RowsHasher, metadata_sha256
 from engiflow_api.domain.errors import DomainError
 from engiflow_api.domain.tabular import (
     CANONICAL_FIELDS,
@@ -99,6 +105,11 @@ def import_upload(
         found = _existing(db, digest, sheet_key)
         if found is not None:
             # Idempotência: mesmo hash e mesma aba não geram registros duplicados.
+            if found.deleted_at is not None:
+                raise DomainError(
+                    "Este arquivo já foi importado como tabela excluída. Restaure a tabela "
+                    "em vez de importar novamente."
+                )
             return ImportResult(dataset=found, created=False)
 
         kind = detect_kind_file(temp_path)
@@ -134,7 +145,7 @@ def import_upload(
             )
             db.add(version)
             db.flush()
-            hasher = CanonicalHasher(stream.columns)
+            hasher = RowsHasher()
             batch: list[dict[str, Any]] = []
             count = 0
             for number, values in stream.rows:
@@ -148,15 +159,22 @@ def import_upload(
                 db.execute(insert(DatasetVersionRow), batch)
             version.row_count = count
             version.content_sha256 = hasher.hexdigest()
-            db.add(
-                DatasetMetadataVersion(
-                    id=str(uuid.uuid4()),
-                    version_id=version.id,
-                    columns=list(stream.columns),
-                    mapping={},
-                )
+            metadata = DatasetMetadataVersion(
+                id=str(uuid.uuid4()),
+                dataset_id=dataset.id,
+                version_id=version.id,
+                number=1,
+                parent_metadata_version_id=None,
+                columns=list(stream.columns),
+                mapping={},
+                header_row=None,
+                metadata_sha256=metadata_sha256(list(stream.columns), {}, None),
+                actor=actor,
             )
+            db.add(metadata)
+            db.flush()
             dataset.current_version_id = version.id
+            dataset.current_metadata_version_id = metadata.id
             dataset.row_count = count
             dataset.warnings = list(stream.warnings)
 
@@ -198,10 +216,98 @@ def import_upload(
         temp_path.unlink(missing_ok=True)
 
 
-def get_dataset(db: DbSession, dataset_id: str) -> Dataset:
+def get_dataset(db: DbSession, dataset_id: str, *, include_deleted: bool = False) -> Dataset:
+    """Tabela ativa. Tabela excluída logicamente só é acessada com `include_deleted`."""
     dataset = db.get(Dataset, dataset_id)
     if dataset is None:
         raise DomainError("Tabela não encontrada.")
+    if dataset.deleted_at is not None and not include_deleted:
+        raise DomainError("Tabela excluída. Restaure-a para continuar.")
+    return dataset
+
+
+def _ensure_active_name(db: DbSession, name: str, exclude_id: str | None) -> None:
+    query = select(Dataset.id).where(
+        func.lower(Dataset.name) == name.lower(), Dataset.deleted_at.is_(None)
+    )
+    if exclude_id is not None:
+        query = query.where(Dataset.id != exclude_id)
+    if db.scalar(query.limit(1)) is not None:
+        raise DomainError("Já existe uma tabela ativa com este nome.")
+
+
+def _clean_name(name: str) -> str:
+    clean = " ".join(name.split())
+    if not clean or len(clean) > 255:
+        raise DomainError("O nome da tabela deve ter entre 1 e 255 caracteres.")
+    return clean
+
+
+def rename_dataset(
+    db: DbSession, dataset: Dataset, name: str, *, actor: str, correlation_id: str | None
+) -> Dataset:
+    clean = _clean_name(name)
+    if clean == dataset.name:
+        return dataset
+    _ensure_active_name(db, clean, exclude_id=dataset.id)
+    previous = dataset.name
+    dataset.name = clean
+    record_event(
+        db,
+        actor=actor,
+        action="dataset.rename",
+        resource=f"dataset:{dataset.id}",
+        result="ok",
+        correlation_id=correlation_id,
+        details={"antes": previous, "depois": clean},
+    )
+    db.flush()
+    return dataset
+
+
+def soft_delete_dataset(
+    db: DbSession,
+    dataset: Dataset,
+    confirm_name: str,
+    *,
+    actor: str,
+    correlation_id: str | None,
+) -> Dataset:
+    """Exclusão lógica. Exige digitar o nome exato. Nada é apagado do banco."""
+    if confirm_name != dataset.name:
+        raise DomainError("Confirme digitando o nome exato da tabela para excluir.")
+    if dataset.deleted_at is None:
+        dataset.deleted_at = datetime.now(UTC)
+        record_event(
+            db,
+            actor=actor,
+            action="dataset.delete",
+            resource=f"dataset:{dataset.id}",
+            result="ok",
+            correlation_id=correlation_id,
+            details={"nome": dataset.name, "tipo": "exclusão lógica"},
+        )
+    db.flush()
+    return dataset
+
+
+def restore_dataset(
+    db: DbSession, dataset: Dataset, *, actor: str, correlation_id: str | None
+) -> Dataset:
+    if dataset.deleted_at is None:
+        return dataset
+    _ensure_active_name(db, dataset.name, exclude_id=dataset.id)
+    dataset.deleted_at = None
+    record_event(
+        db,
+        actor=actor,
+        action="dataset.restore",
+        resource=f"dataset:{dataset.id}",
+        result="ok",
+        correlation_id=correlation_id,
+        details={"nome": dataset.name},
+    )
+    db.flush()
     return dataset
 
 
@@ -213,17 +319,28 @@ def set_mapping(
     actor: str,
     correlation_id: str | None,
 ) -> Dataset:
+    """Mapeamento é uma operação de metadados: gera nova versão de metadados e histórico."""
     clean = validate_mapping(mapping, dataset.columns)
-    previous = dict(dataset.mapping)
-    dataset.mapping = clean
-    record_event(
+    state = current_state(db, dataset)
+    preview = create_preview(
         db,
+        dataset,
+        code="set_mapping",
+        raw_params={"mapping": clean},
+        base_version_id=state.data_version_id,
+        base_metadata_version_id=state.metadata_version_id,
         actor=actor,
-        action="data_studio.mapping",
-        resource=f"dataset:{dataset.id}",
-        result="ok",
         correlation_id=correlation_id,
-        details={"antes": previous, "depois": clean},
+    )
+    apply_preview(
+        db,
+        dataset,
+        preview_id=preview.id,
+        base_version_id=state.data_version_id,
+        base_metadata_version_id=state.metadata_version_id,
+        idempotency_key=None,
+        actor=actor,
+        correlation_id=correlation_id,
     )
     return dataset
 

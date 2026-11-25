@@ -11,13 +11,34 @@ Revises: 0002_data_studio
 Create Date: 2026-11-24
 """
 
+import hashlib
+import json
+import unicodedata
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
-from engiflow_api.domain.canonical import content_sha256
+# Hash do esquema 2B.1 (schema=1, colunas + linhas). Congelado aqui de propósito: migrações não
+# dependem do código atual do domínio. A 0004 recalcula para `rows-v1`.
+
+
+def content_sha256(columns: Sequence[str], rows: Iterable[Sequence[str | None]]) -> str:
+    def nfc(value: str) -> str:
+        return unicodedata.normalize("NFC", value)
+
+    def dump(obj: object) -> str:
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+    hasher = hashlib.sha256()
+    header = {"schema": 1, "columns": [nfc(c) for c in columns]}
+    hasher.update((dump(header) + "\n").encode("utf-8"))
+    for row in rows:
+        cells: list[str | None] = [None if v is None else nfc(v) for v in row]
+        hasher.update((dump(cells) + "\n").encode("utf-8"))
+    return hasher.hexdigest()
+
 
 revision: str = "0003_dataset_versions"
 down_revision: str | None = "0002_data_studio"

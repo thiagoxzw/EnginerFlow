@@ -1,11 +1,12 @@
-"""Registro central de capacidades de transformação (2B.1).
+"""Registro central de capacidades de transformação (2B.1 e 2B.2).
 
-Cada capacidade é uma função pura sobre um Snapshot (colunas + linhas). Não acessa banco nem
-arquivo. Persistência, prévia e auditoria ficam na camada de versionamento.
+Cada capacidade é uma função pura sobre um Snapshot (colunas, linhas, mapeamento, cabeçalho).
+Não acessa banco nem arquivo. Persistência, prévia e auditoria ficam na camada de versionamento.
 
 Regras comuns:
 - Valores: string (texto, zeros preservados), None (desconhecido), "" (vazio). Nunca convertidos.
 - Operação que não encontra alvo falha; nunca altera silenciosamente.
+- `touches_data=False`: operação só de metadados. Não copia linhas; cria só versão de metadados.
 - `code_version` sobe quando o comportamento muda: entra no histórico de cada operação.
 """
 
@@ -16,9 +17,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from engiflow_api.domain.errors import DomainError
+from engiflow_api.domain.query import MAX_FILTERS, FilterIn, RowMatcher, TableQuery
+from engiflow_api.domain.tabular import CANONICAL_FIELDS
 
 MAX_SELECTED_ROWS = 10_000
 
@@ -28,6 +31,11 @@ class Snapshot:
     columns: list[str]
     rows: list[list[str | None]]
     row_numbers: list[int]
+    mapping: dict[str, str] = field(default_factory=dict)
+    header_row: int | None = None
+    # Referência ao template que originou o mapeamento (None quando mapeado manualmente).
+    template_id: str | None = None
+    template_definition_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -47,12 +55,29 @@ class RenameColumnParams(_Strict):
     to_name: str = Field(min_length=1, max_length=255)
 
 
+MAX_REPLACE_COLUMNS = 20
+
+
 class ReplaceTextParams(_Strict):
-    column: str = Field(min_length=1, max_length=255)
+    # `column` é o formato da versão 1 (uma coluna). `columns` é o formato em lote.
+    column: str | None = Field(default=None, min_length=1, max_length=255)
+    columns: list[str] = Field(default_factory=list, max_length=MAX_REPLACE_COLUMNS)
     find: str = Field(min_length=1, max_length=1000)
     replace: str = Field(default="", max_length=1000)
     match_case: bool = True
     whole_cell: bool = False
+    # Só linhas que casam com TODOS os filtros são alteradas. Sem filtro: todas as linhas.
+    filters: list[FilterIn] = Field(default_factory=list, max_length=MAX_FILTERS)
+
+    @model_validator(mode="after")
+    def _one_of_column_or_columns(self) -> ReplaceTextParams:
+        if self.column and not self.columns:
+            self.columns = [self.column]
+        if not self.columns:
+            raise ValueError("Informe ao menos uma coluna.")
+        if len(set(self.columns)) != len(self.columns):
+            raise ValueError("Colunas repetidas na substituição.")
+        return self
 
 
 class SetRowsValueParams(_Strict):
@@ -62,11 +87,29 @@ class SetRowsValueParams(_Strict):
     value: str | None = Field(max_length=1000)
 
 
+class SetMappingParams(_Strict):
+    # campo canônico -> nome da coluna. Campos ausentes ficam sem mapeamento.
+    mapping: dict[str, str] = Field(default_factory=dict)
+
+
 def _column_index(snapshot: Snapshot, name: str) -> int:
     try:
         return snapshot.columns.index(name)
     except ValueError as exc:
         raise DomainError(f"Coluna '{name}' não existe nesta versão.") from exc
+
+
+def _with(snapshot: Snapshot, **changes: Any) -> Snapshot:
+    """Cópia do snapshot com campos alterados (rasa para linhas que não mudaram)."""
+    base: dict[str, Any] = {
+        "columns": list(snapshot.columns),
+        "rows": snapshot.rows,
+        "row_numbers": snapshot.row_numbers,
+        "mapping": dict(snapshot.mapping),
+        "header_row": snapshot.header_row,
+    }
+    base.update(changes)
+    return Snapshot(**base)
 
 
 def _rename_column(snapshot: Snapshot, params: RenameColumnParams) -> OperationResult:
@@ -79,43 +122,61 @@ def _rename_column(snapshot: Snapshot, params: RenameColumnParams) -> OperationR
         raise DomainError(f"Já existe uma coluna chamada '{target}'.")
     columns = list(snapshot.columns)
     columns[index] = target
+    mapping = {
+        field_name: (target if column == params.from_name else column)
+        for field_name, column in snapshot.mapping.items()
+    }
     return OperationResult(
-        snapshot=Snapshot(columns, snapshot.rows, snapshot.row_numbers),
+        snapshot=_with(snapshot, columns=columns, mapping=mapping),
         rows_affected=0,
         cells_changed=0,
     )
 
 
 def _replace_text(snapshot: Snapshot, params: ReplaceTextParams) -> OperationResult:
-    index = _column_index(snapshot, params.column)
+    """Substitui texto nas colunas indicadas, nas linhas que casam com os filtros.
+
+    Desconhecido (None) nunca é alterado. Vazio e zero são texto comum. Contagens:
+    `rows_affected` = linhas com ao menos uma célula alterada; `cells_changed` = células.
+    """
+    indexes: list[int] = []
+    for name in params.columns:
+        index = _column_index(snapshot, name)
+        indexes.append(index)
+    matcher = RowMatcher(list(snapshot.columns), TableQuery(filters=list(params.filters)))
     flags = 0 if params.match_case else re.IGNORECASE
-    pattern = re.compile(
-        rf"^{re.escape(params.find)}$" if params.whole_cell else re.escape(params.find), flags
-    )
+    pattern = re.compile(re.escape(params.find), flags)
+
+    def replaced_cell(cell: str) -> str:
+        if params.whole_cell:
+            return params.replace if pattern.fullmatch(cell) else cell
+        return pattern.sub(lambda _m: params.replace, cell)
+
     rows: list[list[str | None]] = []
     rows_affected = 0
     cells_changed = 0
     for row in snapshot.rows:
-        cell = row[index]
-        if cell is None:  # desconhecido não é substituído
+        if not matcher.matches(row):
             rows.append(row)
             continue
-        if params.whole_cell:
-            left = cell if params.match_case else cell.casefold()
-            needle = params.find if params.match_case else params.find.casefold()
-            replaced = params.replace if left == needle else cell
-        else:
-            replaced = pattern.sub(lambda _m: params.replace, cell)
-        if replaced != cell:
-            cells_changed += 1
+        new_row: list[str | None] | None = None
+        for index in indexes:
+            cell = row[index]
+            if cell is None:  # desconhecido não é substituído
+                continue
+            value = replaced_cell(cell)
+            if value != cell:
+                if new_row is None:
+                    new_row = list(row)
+                new_row[index] = value
+                cells_changed += 1
+        if new_row is not None:
             rows_affected += 1
-            new_row = list(row)
-            new_row[index] = replaced
             rows.append(new_row)
         else:
             rows.append(row)
     return OperationResult(
-        snapshot=Snapshot(list(snapshot.columns), rows, snapshot.row_numbers),
+        snapshot=_with(snapshot, rows=rows),
         rows_affected=rows_affected,
         cells_changed=cells_changed,
     )
@@ -141,9 +202,112 @@ def _set_rows_value(snapshot: Snapshot, params: SetRowsValueParams) -> Operation
         else:
             rows.append(row)
     return OperationResult(
-        snapshot=Snapshot(list(snapshot.columns), rows, snapshot.row_numbers),
+        snapshot=_with(snapshot, rows=rows),
         rows_affected=len(present),
         cells_changed=cells_changed,
+    )
+
+
+class ApplyTemplateParams(_Strict):
+    template_id: str = Field(min_length=1, max_length=36)
+    definition_version: int = Field(ge=1)
+    # Mapeamento copiado do template no momento da prévia (a aplicação usa exatamente isto).
+    mapping: dict[str, str] = Field(default_factory=dict)
+    # Colunas do modelo ausentes na tabela só são ignoradas com confirmação explícita.
+    allow_missing: bool = False
+
+
+def _apply_mapping_template(snapshot: Snapshot, params: ApplyTemplateParams) -> OperationResult:
+    unknown_fields = sorted(set(params.mapping) - set(CANONICAL_FIELDS))
+    if unknown_fields:
+        raise DomainError(f"Campos desconhecidos no modelo: {', '.join(unknown_fields)}.")
+    present = {f: c for f, c in params.mapping.items() if c in snapshot.columns}
+    absent = {f: c for f, c in params.mapping.items() if c not in snapshot.columns}
+    if absent and not params.allow_missing:
+        names = ", ".join(sorted(set(absent.values())))
+        raise DomainError(
+            f"Colunas do modelo não existem nesta tabela: {names}. "
+            "Confirme para aplicar mesmo assim (campos ausentes ficam sem mapeamento)."
+        )
+    warnings = [
+        f"Campo '{f}' sem coluna correspondente ('{c}'): ignorado." for f, c in absent.items()
+    ]
+    return OperationResult(
+        snapshot=_with(
+            snapshot,
+            mapping=present,
+            template_id=params.template_id,
+            template_definition_version=params.definition_version,
+        ),
+        rows_affected=0,
+        cells_changed=0,
+        warnings=warnings,
+    )
+
+
+class SetHeaderParams(_Strict):
+    header_row: int = Field(ge=1, le=1_000_000)
+
+
+def _set_header_row(snapshot: Snapshot, params: SetHeaderParams) -> OperationResult:
+    """`snapshot` já foi reconstruído do arquivo original com o cabeçalho escolhido.
+
+    O mapeamento anterior é mantido só para colunas que ainda existem; o resto vira aviso.
+    """
+    mapping = {f: c for f, c in snapshot.mapping.items() if c in snapshot.columns}
+    warnings = [
+        f"Campo '{f}' sem coluna após trocar o cabeçalho ('{c}'): mapeamento removido."
+        for f, c in snapshot.mapping.items()
+        if c not in snapshot.columns
+    ]
+    return OperationResult(
+        snapshot=_with(snapshot, mapping=mapping, header_row=params.header_row),
+        rows_affected=len(snapshot.rows),
+        cells_changed=0,
+        warnings=warnings,
+    )
+
+
+class DeleteRowsParams(_Strict):
+    row_numbers: list[int] = Field(min_length=1, max_length=MAX_SELECTED_ROWS)
+
+
+def _delete_rows(snapshot: Snapshot, params: DeleteRowsParams) -> OperationResult:
+    """Exclusão lógica: a linha sai desta versão, mas continua nas versões anteriores.
+
+    Os números de linha das demais são preservados (não são renumerados).
+    """
+    selected = set(params.row_numbers)
+    present = {n for n in snapshot.row_numbers if n in selected}
+    missing = sorted(selected - present)
+    if missing:
+        raise DomainError(
+            f"Linhas inexistentes na versão atual: {', '.join(str(n) for n in missing[:10])}."
+        )
+    rows: list[list[str | None]] = []
+    numbers: list[int] = []
+    for number, row in zip(snapshot.row_numbers, snapshot.rows, strict=True):
+        if number not in selected:
+            rows.append(row)
+            numbers.append(number)
+    return OperationResult(
+        snapshot=_with(snapshot, rows=rows, row_numbers=numbers),
+        rows_affected=len(present),
+        cells_changed=0,
+    )
+
+
+def _set_mapping(snapshot: Snapshot, params: SetMappingParams) -> OperationResult:
+    unknown_fields = sorted(set(params.mapping) - set(CANONICAL_FIELDS))
+    if unknown_fields:
+        raise DomainError(f"Campos desconhecidos no mapeamento: {', '.join(unknown_fields)}.")
+    missing = sorted({c for c in params.mapping.values() if c not in snapshot.columns})
+    if missing:
+        raise DomainError(f"Colunas inexistentes na tabela: {', '.join(missing)}.")
+    return OperationResult(
+        snapshot=_with(snapshot, mapping=dict(params.mapping)),
+        rows_affected=0,
+        cells_changed=0,
     )
 
 
@@ -154,34 +318,79 @@ class OperationSpec:
     description: str
     params_model: type[BaseModel]
     reversible: bool
+    touches_data: bool
     apply: Callable[[Snapshot, Any], OperationResult]
+    # True quando o snapshot de entrada vem do arquivo original (reconstrução), não da versão atual.
+    needs_original: bool = False
 
 
 OPERATIONS: dict[str, OperationSpec] = {
     "rename_column": OperationSpec(
         code="rename_column",
-        version=1,
-        description="Renomeia uma coluna. Não altera valores.",
+        version=2,
+        description="Renomeia uma coluna e atualiza o mapeamento. Só metadados: não copia linhas.",
         params_model=RenameColumnParams,
         reversible=True,
+        touches_data=False,
         apply=_rename_column,
+    ),
+    "set_mapping": OperationSpec(
+        code="set_mapping",
+        version=1,
+        description="Define o mapeamento de campos canônicos para colunas. Só metadados.",
+        params_model=SetMappingParams,
+        reversible=True,
+        touches_data=False,
+        apply=_set_mapping,
+    ),
+    "delete_rows": OperationSpec(
+        code="delete_rows",
+        version=1,
+        description="Exclui logicamente linhas selecionadas (podem ser desfeitas). "
+        "Os números das demais linhas são preservados.",
+        params_model=DeleteRowsParams,
+        reversible=True,
+        touches_data=True,
+        apply=_delete_rows,
+    ),
+    "set_header_row": OperationSpec(
+        code="set_header_row",
+        version=1,
+        description="Escolhe a linha real do cabeçalho e reconstrói a tabela a partir do arquivo "
+        "original. Gera nova versão de dados; o histórico é preservado.",
+        params_model=SetHeaderParams,
+        reversible=True,
+        touches_data=True,
+        apply=_set_header_row,
+        needs_original=True,
+    ),
+    "apply_mapping_template": OperationSpec(
+        code="apply_mapping_template",
+        version=1,
+        description="Aplica um modelo de mapeamento reutilizável. Só metadados.",
+        params_model=ApplyTemplateParams,
+        reversible=True,
+        touches_data=False,
+        apply=_apply_mapping_template,
     ),
     "replace_text": OperationSpec(
         code="replace_text",
-        version=1,
-        description="Substitui texto em uma coluna. Desconhecidos não são alterados.",
+        version=2,
+        description="Substitui texto em uma ou mais colunas, nas linhas que casam com filtros. "
+        "Desconhecidos não são alterados.",
         params_model=ReplaceTextParams,
         reversible=True,
+        touches_data=True,
         apply=_replace_text,
     ),
     "set_rows_value": OperationSpec(
         code="set_rows_value",
         version=1,
-        description=(
-            "Define o valor de uma coluna nas linhas selecionadas (texto, vazio ou desconhecido)."
-        ),
+        description="Define o valor de uma coluna nas linhas selecionadas "
+        "(texto, vazio ou desconhecido).",
         params_model=SetRowsValueParams,
         reversible=True,
+        touches_data=True,
         apply=_set_rows_value,
     ),
 }

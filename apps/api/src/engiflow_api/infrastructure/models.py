@@ -93,6 +93,8 @@ class Dataset(Base):
     current_version_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("dataset_versions.id", use_alter=True), nullable=True
     )
+    current_metadata_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -134,16 +136,51 @@ class DatasetVersionRow(Base):
 
 
 class DatasetMetadataVersion(Base):
-    """Colunas e mapeamento de uma versão (metadados versionados)."""
+    """Metadados de uma tabela (colunas, mapeamento, cabeçalho). Cadeia própria, imutável.
+
+    `version_id` é a versão de DADOS que esta descrição acompanha. Várias versões de metadados
+    podem apontar para a mesma versão de dados (mudança só de mapeamento não copia linhas).
+    """
 
     __tablename__ = "dataset_metadata_versions"
+    __table_args__ = (UniqueConstraint("dataset_id", "number", name="uq_dataset_metadata_number"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    version_id: Mapped[str] = mapped_column(
-        ForeignKey("dataset_versions.id", ondelete="CASCADE"), nullable=False, unique=True
+    dataset_id: Mapped[str] = mapped_column(
+        ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
     )
+    version_id: Mapped[str] = mapped_column(
+        ForeignKey("dataset_versions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_metadata_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     columns: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     mapping: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+    header_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    template_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    template_definition_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False, default="sistema")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DatasetTemplate(Base):
+    """Template reutilizável de mapeamento (campos canônicos -> nomes de colunas)."""
+
+    __tablename__ = "dataset_templates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    definition: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class DatasetOperation(Base):
@@ -167,6 +204,8 @@ class DatasetOperation(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     before_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
     after_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    before_metadata_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    after_metadata_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     rows_affected: Mapped[int] = mapped_column(Integer, nullable=False)
     cells_changed: Mapped[int] = mapped_column(Integer, nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -186,11 +225,13 @@ class DatasetPreview(Base):
         ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
     )
     base_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    base_metadata_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     code_version: Mapped[int] = mapped_column(Integer, nullable=False)
     params: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     params_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     after_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    after_metadata_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     rows_affected: Mapped[int] = mapped_column(Integer, nullable=False)
     cells_changed: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
