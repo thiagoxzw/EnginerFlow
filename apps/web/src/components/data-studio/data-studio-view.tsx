@@ -13,6 +13,7 @@ import {
   TableAdminSection,
 } from "@/components/data-studio/table-admin";
 import { CrossLookupSection } from "@/components/data-studio/cross-lookup-section";
+import { AggregateSection } from "@/components/data-studio/aggregate-section";
 import { JoinSection } from "@/components/data-studio/join-section";
 import { UploadSection } from "@/components/data-studio/upload-section";
 import { ReplaceSection } from "@/components/data-studio/replace-section";
@@ -286,6 +287,13 @@ function DatasetPanel({
             datasets={allDatasets.data ?? []}
             onDerived={onOpen}
           />
+        </div>
+      </details>
+
+      <details className={sectionClass}>
+        <summary className="cursor-pointer font-medium">Agrupar e agregar (somas, contagens)</summary>
+        <div className="pt-3">
+          <AggregateSection datasetId={datasetId} columns={data.columns} onDerived={onOpen} />
         </div>
       </details>
 

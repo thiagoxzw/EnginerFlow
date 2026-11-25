@@ -14,9 +14,12 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from engiflow_api.application.crossing import (
+    AggregateSpec,
     LookupSpec,
+    create_derived_aggregate,
     create_derived_join,
     create_derived_lookup,
+    run_aggregate,
     run_join,
     run_lookup,
 )
@@ -207,6 +210,67 @@ def join_derive(payload: JoinIn, request: Request, user: CurrentUser, db: DbDep)
         tuple(payload.left_keys),
         tuple(payload.right_keys),
         payload.join_type,
+        actor=user.email,
+        correlation_id=_correlation(request),
+    )
+    db.commit()
+    return DerivedOut(
+        dataset_id=outcome.dataset.id,
+        name=outcome.dataset.name,
+        run_id=outcome.run.id,
+        row_count=outcome.row_count,
+        counts={k: v for k, v in outcome.counts.items()},
+        result_sha256=outcome.run.result_sha256,
+    )
+
+
+class AggregateMeasureIn(BaseModel):
+    column: str = Field(min_length=1, max_length=255)
+    op: Literal["count", "count_distinct", "sum", "avg", "min", "max"]
+
+
+class AggregateIn(BaseModel):
+    dataset_id: str = Field(min_length=1, max_length=36)
+    group_by: list[str] = Field(default_factory=list, max_length=5)
+    measures: list[AggregateMeasureIn] = Field(min_length=1, max_length=10)
+
+
+class AggregatePreviewOut(BaseModel):
+    columns: list[str]
+    rows: list[list[str | None]]
+    input_rows: int
+    groups: int
+
+
+def _aggregate_spec(payload: AggregateIn) -> AggregateSpec:
+    return AggregateSpec(
+        group_by=tuple(payload.group_by),
+        measures=tuple((m.column, m.op) for m in payload.measures),
+    )
+
+
+@router.post("/aggregate/preview", response_model=AggregatePreviewOut)
+def aggregate_preview(payload: AggregateIn, user: CurrentUser, db: DbDep) -> AggregatePreviewOut:
+    """Grupos e medidas antes de criar a tabela. Não grava nada."""
+    dataset = get_dataset(db, payload.dataset_id)
+    result = run_aggregate(db, dataset, _aggregate_spec(payload))
+    return AggregatePreviewOut(
+        columns=result.columns,
+        rows=result.rows[:500],
+        input_rows=result.input_rows,
+        groups=len(result.rows),
+    )
+
+
+@router.post("/aggregate/derive", response_model=DerivedOut, status_code=201)
+def aggregate_derive(
+    payload: AggregateIn, request: Request, user: CurrentUser, db: DbDep
+) -> DerivedOut:
+    dataset = get_dataset(db, payload.dataset_id)
+    outcome = create_derived_aggregate(
+        db,
+        dataset,
+        _aggregate_spec(payload),
         actor=user.email,
         correlation_id=_correlation(request),
     )

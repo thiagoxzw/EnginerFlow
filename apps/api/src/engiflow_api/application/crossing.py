@@ -17,6 +17,7 @@ from sqlalchemy import insert, select
 from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.application.audit import record_event
+from engiflow_api.domain import aggregate as ag
 from engiflow_api.domain import join as jn
 from engiflow_api.domain import lookup as lk
 from engiflow_api.domain.canonical import metadata_sha256, rows_sha256
@@ -160,7 +161,7 @@ def _canonical_params(spec: LookupSpec, left_id: str, right_id: str) -> dict[str
 def store_derived(
     db: DbSession,
     left: Dataset,
-    right: Dataset,
+    right: Dataset | None,
     *,
     kind: str,
     operation_version: int,
@@ -189,7 +190,8 @@ def store_derived(
     db.add(run)
     db.flush()
 
-    for role, dataset in (("left", left), ("right", right)):
+    sources = [("left", left)] + ([("right", right)] if right is not None else [])
+    for role, dataset in sources:
         if dataset.current_version_id is None or dataset.current_metadata_version_id is None:
             raise DomainError("Tabela de origem sem versão atual.")
         db.add(
@@ -203,8 +205,9 @@ def store_derived(
             )
         )
 
+    origin_name = left.name if right is None else f"{left.name} × {right.name}"
     derived = Dataset(
-        name=f"{left.name} × {right.name} ({label})"[:255],
+        name=f"{origin_name} ({label})"[:255],
         source_filename="derivada",
         source_sha256=hashlib.sha256(run.id.encode("utf-8")).hexdigest(),
         file_kind="derived",
@@ -268,7 +271,7 @@ def store_derived(
         correlation_id=correlation_id,
         details={
             "run_id": run.id,
-            "origens": [left.id, right.id],
+            "origens": [dataset.id for _, dataset in sources],
             "params_sha256": run.params_sha256,
             "result_sha256": run.result_sha256,
             "linhas": len(rows),
@@ -411,6 +414,91 @@ def create_derived_join(
         counts=counts,
         columns=outcome.columns,
         rows=outcome.rows,
+        actor=actor,
+        correlation_id=correlation_id,
+    )
+
+
+AGGREGATE_OPERATION_VERSION = 1
+
+MEASURE_LABELS = {
+    "count": "contagem",
+    "count_distinct": "distintos",
+    "sum": "soma",
+    "avg": "média",
+    "min": "mínimo",
+    "max": "máximo",
+}
+
+
+@dataclass(frozen=True)
+class AggregateSpec:
+    group_by: tuple[str, ...]
+    measures: tuple[tuple[str, str], ...]
+
+
+def _aggregate_plan(
+    dataset: Dataset, spec: AggregateSpec
+) -> tuple[list[int], list[tuple[int, str]], list[str]]:
+    columns = list(dataset.columns)
+    group_idx = _indexes(columns, spec.group_by, "a tabela") if spec.group_by else []
+    measure_idx: list[tuple[int, str]] = []
+    labels: list[str] = []
+    for name, op in spec.measures:
+        if op not in ag.OPERATIONS:
+            raise DomainError(f"Operação de agregação desconhecida: '{op}'.")
+        measure_idx.append((_indexes(columns, (name,), "a tabela")[0], op))
+        labels.append(f"{MEASURE_LABELS[op]} de {name}")
+    return group_idx, measure_idx, labels
+
+
+def run_aggregate(
+    db: DbSession, dataset: Dataset, spec: AggregateSpec, *, max_groups: int = ag.MAX_GROUPS
+) -> ag.AggregateResult:
+    """Agrega a versão atual da tabela. Recusa acima do limite de grupos."""
+    group_idx, measure_idx, labels = _aggregate_plan(dataset, spec)
+    columns = list(dataset.columns)
+    rows = (list(values) for _, values in _stream_current(db, dataset))
+    try:
+        return ag.aggregate(
+            rows,
+            group_idx,
+            measure_idx,
+            [columns[i] for i in group_idx],
+            labels,
+            max_groups=max_groups,
+        )
+    except ValueError as exc:
+        raise DomainError(str(exc)) from exc
+
+
+def create_derived_aggregate(
+    db: DbSession,
+    dataset: Dataset,
+    spec: AggregateSpec,
+    *,
+    actor: str,
+    correlation_id: str | None,
+) -> DerivedOutcome:
+    result = run_aggregate(db, dataset, spec)
+    params: dict[str, Any] = {
+        "dataset_id": dataset.id,
+        "group_by": list(spec.group_by),
+        "measures": [[name, op] for name, op in spec.measures],
+        "policy": {"operation": "aggregate"},
+    }
+    counts: dict[str, Any] = {"linhas_lidas": result.input_rows, "grupos": len(result.rows)}
+    return store_derived(
+        db,
+        dataset,
+        None,
+        kind="aggregate",
+        operation_version=AGGREGATE_OPERATION_VERSION,
+        label="Agregação",
+        params=params,
+        counts=counts,
+        columns=result.columns,
+        rows=result.rows,
         actor=actor,
         correlation_id=correlation_id,
     )
