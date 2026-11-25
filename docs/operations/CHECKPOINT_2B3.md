@@ -22,11 +22,12 @@ Atualizado em 2026-11-25. Leia antes de retomar. Não contém credenciais nem da
 - Benchmark: projeto `engiflow-bench`, porta 5552. Descartável, removido ao final.
 - Banco `engiflow_bench` dentro do PostgreSQL demonstrativo (criado em sessão anterior): mantido. Exclusão só com autorização.
 
-## Pendências de decisão do usuário
-1. Tabelas sintéticas acumuladas no demonstrativo por rodadas E2E anteriores (25 derivadas e 15 importações `SYN-*`): excluir ou manter.
-2. Banco `engiflow_bench` no PostgreSQL demonstrativo: excluir ou manter.
-3. Parar o stack `engiflow-audit` (auxiliar).
-4. Atualizar a descrição do PR #4 (sem ferramenta autenticada nesta sessão; texto preparado em `FASE_2B3_STATUS.md`).
+## Encerramento administrativo (2026-11-25)
+1. **Tabelas sintéticas:** 37 removidas por exclusão lógica pela API (25 derivadas e 12 importações `SYN-*`). Lista e IDs em `backups/removidos-sinteticos-20261125-135151.txt`. Restauráveis pela API (`POST /api/v1/datasets/{id}/restore`).
+2. **Cópia duplicada de `Codigos totus - separado`:** conteúdo idêntico (mesmo `content_sha256`, 1706 linhas). A cópia `ab5091de…` (sem histórico) foi excluída logicamente. Preservada `6aebaf7e…`, a mais completa: tem a operação `set_mapping` aplicada e o mapeamento v2 das colunas.
+3. **Banco `engiflow_bench`:** removido em sessão anterior, após comprovação de ser exclusivo de benchmark.
+4. **Stack `engiflow-audit`:** contêineres, volumes e rede removidos. Verificado em 2026-11-25: sem contêineres, sem volumes `engiflow-audit*` e sem rede `engiflow-audit_default`.
+5. **PR #4:** descrição não atualizada por este ambiente (sem autenticação GitHub concedida). Texto em `FASE_2B3_STATUS.md`.
 
 ## Limitações (Fase 3)
 Ver a seção 7 de `FASE_2B3_STATUS.md`.

@@ -133,3 +133,15 @@ Banco `engiflow_bench` criado no PostgreSQL pessoal em sessão anterior: **manti
 
 Ver a seção "Validação final" em `CHECKPOINT_2B3.md` (atualizada com os resultados do commit final).
 O CI do GitHub é verificado no commit final antes de qualquer recomendação de merge.
+
+## Encerramento administrativo (2026-11-25)
+
+- Exclusão lógica de 37 tabelas sintéticas pela API; lista e IDs em `backups/removidos-sinteticos-20261125-135151.txt`.
+- Duplicata de `Codigos totus - separado`: removida a cópia sem histórico (`ab5091de…`), conteúdo idêntico. Mantida `6aebaf7e…`, com a operação `set_mapping`.
+- Recursos antigos de auditoria e benchmark removidos. Rede `engiflow-audit_default` inexistente. Sem comandos globais de limpeza.
+- Início da Fase 3 com a seleção de intervalo de células (commit `94e68f7`). Demais itens da Fase 3 seguem pendentes.
+- Descrição do PR #4 (texto para colar, pois este ambiente não tem autenticação GitHub):
+
+> Fase 2B.3 concluída: cruzamentos e comparações de tabelas (PROCV, junção, comparação por chave, agregação e fórmulas), com prévia e aplicação, histórico, rastreabilidade e idempotência. Inclui migração 0006 (chave de idempotência). Fase 3 em commits separados para revisão independente.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
