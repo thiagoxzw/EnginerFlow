@@ -253,7 +253,7 @@ function DatasetPanel({
         </details>
       ) : null}
 
-      <DataTable datasetId={datasetId} columns={data.columns} />
+      <DataTable key={datasetId} datasetId={datasetId} columns={data.columns} />
 
       <Tabs
         label="Ferramentas da tabela"

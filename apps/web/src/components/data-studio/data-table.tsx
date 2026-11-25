@@ -23,6 +23,25 @@ const inputClass = "rounded-md border border-[var(--color-border)] bg-transparen
 const buttonClass =
   "rounded-md border border-[var(--color-border)] px-2 py-1 text-sm hover:bg-[var(--color-border)] disabled:opacity-50";
 const PAGE_SIZES = [25, 50, 100];
+/** Lê as colunas ocultas guardadas neste navegador. Falha de armazenamento não quebra a tabela. */
+export function readHiddenColumns(key: string): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeHiddenColumns(key: string, hidden: Set<string>): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify([...hidden]));
+  } catch {
+    // armazenamento indisponível (navegação privada, por exemplo): a preferência vale só nesta sessão
+  }
+}
+
 /** Colagens com mais células que isto pedem confirmação explícita antes de gravar. */
 const CONFIRM_PASTE_ABOVE = 20;
 const OPS = Object.keys(OP_LABELS) as FilterOp[];
@@ -46,6 +65,22 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const [pasteMessage, setPasteMessage] = useState<string | null>(null);
   const [pendingPaste, setPendingPaste] = useState<(PastePlan & { ok: true }) | null>(null);
   const [pasting, setPasting] = useState(false);
+  // Colunas ocultas: preferência de visualização desta tabela, guardada só neste navegador.
+  const hiddenKey = `engiflow:colunas-ocultas:${datasetId}`;
+  const [hidden, setHidden] = useState<Set<string>>(() => readHiddenColumns(hiddenKey));
+
+  function toggleHidden(column: string) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(column)) {
+        next.delete(column);
+      } else if (columns.length - next.size > 1) {
+        next.add(column); // nunca oculta todas as colunas
+      }
+      writeHiddenColumns(hiddenKey, next);
+      return next;
+    });
+  }
 
   /** Célula de origem do evento de copiar/colar, com o valor exibido. Null fora das células. */
   function focusedCell(target: EventTarget | null): (CellTarget & { value: string | null }) | null {
@@ -75,8 +110,18 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
     const focus = focusedCell(event.target);
     if (!focus) return;
     event.preventDefault();
+    const matrix = parseTsv(event.clipboardData.getData("text/plain"));
+    const width = Math.max(0, ...matrix.map((r) => r.length));
+    const crossesHidden = Array.from({ length: width }, (_, k) => focus.colIndex + k).some((k) =>
+      hidden.has(columns[k] ?? ""),
+    );
+    if (crossesHidden) {
+      // Colar numa coluna oculta sem perceber seria uma alteração invisível: a colagem é recusada.
+      setPasteMessage("A colagem atravessa colunas ocultas. Mostre-as no menu “Colunas” para colar.");
+      return;
+    }
     const plan = planPaste(
-      parseTsv(event.clipboardData.getData("text/plain")),
+      matrix,
       focus,
       columns,
       (rows.data?.rows ?? []).map((r) => r.row_number),
@@ -290,6 +335,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
               </th>
               <th className="px-2 py-1 font-medium">Linha</th>
               {columns.map((c) => {
+                if (hidden.has(c)) return null;
                 const active = sort?.column === c ? sort.dir : null;
                 return (
                   <th
@@ -326,17 +372,19 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                   />
                 </td>
                 <td className="px-2 py-1 text-[var(--color-muted)]">{row.row_number}</td>
-                {row.values.map((value, i) => (
-                  <EditableCell
-                    key={i}
-                    datasetId={datasetId}
-                    rowNumber={row.row_number}
-                    rowIndex={rowIndex}
-                    colIndex={i}
-                    column={columns[i] ?? ""}
-                    value={value}
-                  />
-                ))}
+                {row.values.map((value, i) =>
+                  hidden.has(columns[i] ?? "") ? null : (
+                    <EditableCell
+                      key={i}
+                      datasetId={datasetId}
+                      rowNumber={row.row_number}
+                      rowIndex={rowIndex}
+                      colIndex={i}
+                      column={columns[i] ?? ""}
+                      value={value}
+                    />
+                  ),
+                )}
               </tr>
             ))}
           </tbody>
@@ -398,6 +446,20 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
           </span>
         ) : null}
       </div>
+
+      <details className="text-sm">
+        <summary className="cursor-pointer">
+          Colunas: {columns.length - hidden.size} de {columns.length} visíveis
+        </summary>
+        <div className="mt-2 flex flex-wrap gap-3">
+          {columns.map((c) => (
+            <label key={c} className="flex items-center gap-1">
+              <input type="checkbox" checked={!hidden.has(c)} onChange={() => toggleHidden(c)} />
+              {c}
+            </label>
+          ))}
+        </div>
+      </details>
 
       {pasteMessage ? (
         <p role="alert" className="text-sm text-[var(--color-danger)]">
