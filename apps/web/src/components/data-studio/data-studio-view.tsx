@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
+import { SELECTED_TABLE_KEY, usePersistedString } from "@/lib/persist";
 import { DataTable } from "@/components/data-studio/data-table";
 import { HeaderSection } from "@/components/data-studio/header-section";
 import { HistoryList, UndoRedoControls } from "@/components/data-studio/history-panel";
@@ -58,7 +59,10 @@ export function DataStudioView() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const datasets = useQuery({ queryKey: ["datasets"], queryFn: listDatasets });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Tabela aberta persiste neste navegador. Se ela não existe mais (excluída), nada é aberto.
+  const [storedId, setSelectedId] = usePersistedString(SELECTED_TABLE_KEY);
+  const selectedId =
+    datasets.data && storedId && !datasets.data.some((d) => d.id === storedId) ? null : storedId;
   // Aviso da última operação (ex.: tabela derivada criada). Fica na página, não no painel que é trocado.
   const [notice, setNotice] = useState<string | null>(null);
 

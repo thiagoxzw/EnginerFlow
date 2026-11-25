@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, type KeyboardEvent } from "react";
+import { useState, type CSSProperties, type KeyboardEvent } from "react";
 
 import { CellValue } from "@/components/data-studio/cell-value";
 import type { PasteCell } from "@/lib/clipboard";
@@ -88,6 +88,7 @@ export function EditableCell({
   column,
   value,
   range,
+  style,
 }: {
   datasetId: string;
   rowNumber: number;
@@ -96,6 +97,7 @@ export function EditableCell({
   column: string;
   value: string | null;
   range: RangeHandlers;
+  style?: CSSProperties;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -179,6 +181,7 @@ export function EditableCell({
       onDoubleClick={() => !saving && start()}
       onKeyDown={onCellKey}
       data-in-range={range.inRange ? "1" : undefined}
+      style={style}
       className={`px-2 py-1 text-xs focus:outline-2 focus:outline-[var(--color-accent)] ${
         range.inRange ? "bg-[var(--color-selection,rgba(59,130,246,0.18))]" : ""
       }`}

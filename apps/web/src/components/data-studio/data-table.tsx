@@ -4,12 +4,26 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useState,
   type ClipboardEvent,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
 import { EditableCell, commitCells, commitOperation } from "@/components/data-studio/cell-editor";
 import { StructureMenu, type MenuItem } from "@/components/data-studio/structure-menu";
+import {
+  displayOrder,
+  fitWidth,
+  moveColumn,
+  readTableView,
+  reconcileView,
+  setWidth,
+  togglePin,
+  viewKey,
+  widthOf,
+  writeTableView,
+  type TableView,
+} from "@/lib/table-view";
 import { RowActions } from "@/components/data-studio/row-actions";
 import { errorText } from "@/components/data-studio/templates-section";
 import { copyText, parseTsv, planPaste, type CellTarget, type PasteCell, type PastePlan } from "@/lib/clipboard";
@@ -93,6 +107,75 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   // Colunas ocultas: preferência de visualização desta tabela, guardada só neste navegador.
   const hiddenKey = `engiflow:colunas-ocultas:${datasetId}`;
   const [hidden, setHidden] = useState<Set<string>>(() => readHiddenColumns(hiddenKey));
+  // Visão por tabela (ordem, largura e fixação): preferência deste navegador, nunca gera versão.
+  const viewStoreKey = viewKey(datasetId);
+  const [view, setView] = useState<TableView>(() => readTableView(viewStoreKey, columns));
+  const liveView = reconcileView(view, columns);
+  const viewColumns = displayOrder(liveView);
+  const viewIndex = viewColumns.map((c) => columns.indexOf(c));
+
+  function changeView(next: TableView) {
+    setView(next);
+    writeTableView(viewStoreKey, next);
+  }
+
+  /** Deslocamento à esquerda de uma coluna fixada: soma as larguras das fixadas anteriores. */
+  function pinnedOffset(name: string): number {
+    let offset = 0;
+    for (const c of liveView.pinned) {
+      if (c === name) return offset;
+      offset += widthOf(liveView, c);
+    }
+    return offset;
+  }
+
+  /** Estilo de largura (e fixação, quando fixada) para as células de uma coluna. */
+  function cellStyle(name: string): CSSProperties {
+    const width = widthOf(liveView, name);
+    const base: CSSProperties = { width, minWidth: width, maxWidth: width };
+    if (!liveView.pinned.includes(name)) return base;
+    return {
+      ...base,
+      position: "sticky",
+      left: pinnedOffset(name),
+      zIndex: 1,
+      background: "var(--color-surface)",
+    };
+  }
+
+  /** Arraste na borda do cabeçalho redimensiona a coluna. Persiste ao soltar o mouse. */
+  function startResize(event: ReactMouseEvent, name: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = widthOf(liveView, name);
+    let latest: TableView = liveView;
+    const onMove = (ev: MouseEvent) => {
+      latest = setWidth(liveView, name, startWidth + ev.clientX - startX);
+      setView(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      writeTableView(viewStoreKey, latest);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function fitColumn(name: string) {
+    const index = columns.indexOf(name);
+    const values = (rows.data?.rows ?? []).map((r) => r.values[index] ?? null);
+    changeView(setWidth(liveView, name, fitWidth(name, values)));
+  }
+
+  function moveBy(name: string, delta: -1 | 1) {
+    changeView(moveColumn(liveView, name, delta));
+  }
+
+  function togglePinned(name: string) {
+    changeView(togglePin(liveView, name));
+  }
 
   function toggleHidden(column: string) {
     setHidden((prev) => {
@@ -114,7 +197,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
     if (!cell) return null;
     const rowIndex = Number(cell.dataset.rowIndex);
     const colIndex = Number(cell.dataset.colIndex);
-    const row = rows.data?.rows[rowIndex];
+    const row = viewRows[rowIndex];
     if (!row) return null;
     return { rowNumber: row.row_number, rowIndex, colIndex, value: row.values[colIndex] ?? null };
   }
@@ -123,7 +206,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
     if (event.target instanceof HTMLInputElement) return; // edição de célula usa o copiar do campo
     const focus = focusedCell(event.target);
     if (!focus) return;
-    const selectedValues = (rows.data?.rows ?? [])
+    const selectedValues = viewRows
       .filter((r) => selected.has(r.row_number))
       .map((r) => r.values);
     event.preventDefault();
@@ -138,7 +221,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
     const matrix = parseTsv(event.clipboardData.getData("text/plain"));
     const width = Math.max(0, ...matrix.map((r) => r.length));
     const crossesHidden = Array.from({ length: width }, (_, k) => focus.colIndex + k).some((k) =>
-      hidden.has(columns[k] ?? ""),
+      hidden.has(viewColumns[k] ?? ""),
     );
     if (crossesHidden) {
       // Colar numa coluna oculta sem perceber seria uma alteração invisível: a colagem é recusada.
@@ -148,8 +231,8 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
     const plan = planPaste(
       matrix,
       focus,
-      columns,
-      (rows.data?.rows ?? []).map((r) => r.row_number),
+      viewColumns,
+      viewRows.map((r) => r.row_number),
     );
     setPasteMessage(null);
     if (!plan.ok) {
@@ -174,7 +257,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
 
   function extend(rowIndex: number, colIndex: number, rowDelta: number, colDelta: number) {
     const maxRow = (rows.data?.rows.length ?? 1) - 1;
-    const maxCol = columns.length - 1;
+    const maxCol = viewColumns.length - 1;
     commitRange(
       extendRange(
         range ?? { anchor: { rowIndex, colIndex }, focus: { rowIndex, colIndex } },
@@ -189,7 +272,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   /** Delete/Backspace: limpa o intervalo visível. Grandes limpezas pedem confirmação, como as colagens. */
   function clearSelection() {
     if (!range || !rows.data) return;
-    const cells = clearRangeCells(range, rows.data.rows, columns, hidden);
+    const cells = clearRangeCells(range, viewRows, viewColumns, hidden);
     if (cells.length === 0) return;
     if (cells.length > CONFIRM_PASTE_ABOVE) {
       setPendingClear({ scope: scopeKey, cells });
@@ -305,6 +388,13 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
               `Coluna ${column} duplicada. Desfazer reverte.`,
             ),
         },
+        { label: "Mover para a esquerda", run: () => moveBy(column, -1) },
+        { label: "Mover para a direita", run: () => moveBy(column, 1) },
+        {
+          label: liveView.pinned.includes(column) ? "Soltar coluna" : "Fixar coluna à esquerda",
+          run: () => togglePinned(column),
+        },
+        { label: "Ajustar largura ao conteúdo", run: () => fitColumn(column) },
         {
           label: "Excluir coluna",
           danger: true,
@@ -325,7 +415,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   function onKeyDown(event: KeyboardEvent<HTMLTableElement>) {
     if (event.target instanceof HTMLInputElement) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-      const all = pageRange(rows.data?.rows.length ?? 0, columns.length);
+      const all = pageRange(viewRows.length, viewColumns.length);
       if (!all) return;
       event.preventDefault();
       commitRange(all);
@@ -384,6 +474,12 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
     setFilters((prev) => prev.filter((_, i) => i !== index));
     resetPage();
   }
+
+  // Linhas na ordem de exibição: os índices de célula (copiar, colar, selecionar) referem-se a ela.
+  const viewRows = (rows.data?.rows ?? []).map((row) => ({
+    ...row,
+    values: viewIndex.map((i) => row.values[i] ?? null),
+  }));
 
   function toggleSort(column: string) {
     setSort((prev) => {
@@ -528,27 +624,45 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                 />
               </th>
               <th className="px-2 py-1 font-medium">Linha</th>
-              {columns.map((c) => {
+              {viewColumns.map((c) => {
                 if (hidden.has(c)) return null;
                 const active = sort?.column === c ? sort.dir : null;
+                const pinned = liveView.pinned.includes(c);
+                const width = widthOf(liveView, c);
                 return (
                   <th
                     key={c}
                     onContextMenu={(e) => openColumnMenu(e, c)}
-                    className="px-2 py-1 font-medium"
+                    style={{
+                      width,
+                      minWidth: width,
+                      maxWidth: width,
+                      ...(pinned
+                        ? { position: "sticky" as const, left: pinnedOffset(c), zIndex: 2 }
+                        : {}),
+                    }}
+                    className={`relative px-2 py-1 font-medium ${pinned ? "bg-[var(--color-surface)]" : ""}`}
                     aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
                   >
                     <button type="button" onClick={() => toggleSort(c)} className="hover:underline">
                       {c}
                       {active === "asc" ? " ▲" : active === "desc" ? " ▼" : ""}
                     </button>
+                    <span
+                      role="separator"
+                      aria-label={`Largura da coluna ${c}. Arraste para redimensionar; duplo clique ajusta ao conteúdo.`}
+                      title="Arraste para redimensionar · duplo clique ajusta ao conteúdo"
+                      onMouseDown={(e) => startResize(e, c)}
+                      onDoubleClick={() => fitColumn(c)}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-[var(--color-accent)]"
+                    />
                   </th>
                 );
               })}
             </tr>
           </thead>
           <tbody>
-            {(rows.data?.rows ?? []).map((row, rowIndex) => (
+            {viewRows.map((row, rowIndex) => (
               <tr key={row.row_number} className="border-t border-[var(--color-border)]">
                 <td className="px-2 py-1">
                   <input
@@ -573,15 +687,16 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                   {row.row_number}
                 </td>
                 {row.values.map((value, i) =>
-                  hidden.has(columns[i] ?? "") ? null : (
+                  hidden.has(viewColumns[i] ?? "") ? null : (
                     <EditableCell
                       key={i}
                       datasetId={datasetId}
                       rowNumber={row.row_number}
                       rowIndex={rowIndex}
                       colIndex={i}
-                      column={columns[i] ?? ""}
+                      column={viewColumns[i] ?? ""}
                       value={value}
+                      style={cellStyle(viewColumns[i] ?? "")}
                       range={{
                         inRange: rangeContains(range, rowIndex, i),
                         onPointer: pointer,
