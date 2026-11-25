@@ -1,4 +1,4 @@
-# Fase 2B.2 — Status de homologação
+﻿# Fase 2B.2 — Status de homologação
 
 Branch: `feat/fase-2b-2-data-manipulation` · PR #3 (Draft até a conclusão desta revisão).
 Dados: exclusivamente sintéticos. Uso individual, sem RBAC nem multi-tenancy.
@@ -24,7 +24,7 @@ Não há merge: a decisão de mesclar é do responsável pelo projeto.
 
 - **CI no commit `1832fb7`** (execução `45535641946`): API (Python, PostgreSQL 17) sucesso; Web sucesso; E2E (Playwright) sucesso.
 - **Execução manual `45535650972`** (mesmo commit): API, Web, E2E e benchmark sucesso.
-- **Fluxos críticos** (`fluxos-criticos.spec.ts`): seis cenários passam localmente em banco novo, contra a API e a web de produção. A execução no CI para o commit `b63fa0a` deve ser conferida antes da marcação como pronto.
+- **Fluxos críticos** (`fluxos-criticos.spec.ts`): seis cenários passam localmente em banco novo, contra a API e a web de produção. No CI do commit `69bdf18` (execução `45537209605`) o job E2E passou, incluindo os seis fluxos.
 - **Web:** 39 testes de componente e unidade; typecheck e lint limpos.
 - **API:** 180 testes (SQLite e PostgreSQL 17 no CI).
 
@@ -114,7 +114,7 @@ Achados não corrigidos nesta fase (melhorias para a 2B.4, sem defeito funcional
 | Preservação do histórico das fases anteriores | Aprovado | testes de migração e de histórico |
 | Concorrência de dados e metadados | Aprovado | testes de concorrência (API) e conflito entre abas (E2E) |
 | Requisições legadas não alteram metadados obsoletos | Aprovado | `test_metadata_versioning_2b2.py` (409) |
-| Aplicação de modelo com confirmação parcial | Aprovado | `fluxos-criticos.spec.ts` (local); CI do `b63fa0a` pendente de conferência |
+| Aplicação de modelo com confirmação parcial | Aprovado | `fluxos-criticos.spec.ts`; CI `45537209605` |
 | Seleção manual de cabeçalho | Aprovado | `test_header_2b2.py`; `fluxos-criticos.spec.ts` |
 | Transformação e exclusão de linhas | Aprovado | `test_rows_ops_2b2.py`; `fluxos-criticos.spec.ts` |
 | Desfazer e refazer | Aprovado | `history-panel.test.tsx`; E2E |
@@ -126,8 +126,7 @@ Achados não corrigidos nesta fase (melhorias para a 2B.4, sem defeito funcional
 | Interface utilizável (desktop e 375 px) | Aprovado com melhorias registradas | capturas e medição de overflow |
 | Playwright em CI | Aprovado | CI `45535641946` (job E2E) |
 
-## Pendente antes de marcar o PR como pronto
+## Situação final
 
-1. Conferir o CI do commit `b63fa0a` (inclui os seis fluxos críticos no job E2E).
-2. Atualizar a descrição do PR #3 com esta matriz e as limitações.
-3. Decisão de merge: fica com o responsável pelo projeto.
+PR #3 marcado como pronto para revisão (não mesclado). A decisão de merge fica com o responsável pelo projeto.
+
