@@ -26,12 +26,13 @@ pytestmark = pytest.mark.skipif(not enabled, reason="Medição de desempenho: de
 
 
 def _csv(total: int) -> tuple[bytes, int]:
-    """Hierarquia de 3 níveis: topo → conjuntos → subconjuntos → componentes (folhas reaproveitadas)."""
     rows = ["Código pai;Código;Descrição;Qtd;Unidade;Revisão"]
     rows.append(";TOP-SYN;Veículo sintético;1;UN;A")
     subsystems = 10
     sub_per_system = max(2, total // 200)
-    leaves_per_sub = max(1, (total - subsystems - subsystems * sub_per_system) // (subsystems * sub_per_system))
+    leaves_per_sub = max(
+        1, (total - subsystems - subsystems * sub_per_system) // (subsystems * sub_per_system)
+    )
     count = 1
     for s in range(subsystems):
         sys_code = f"SYS-SYN-{s:02d}"
@@ -81,7 +82,9 @@ def _peak_mb(fn: Any) -> tuple[float, float]:
 
 
 @pytest.mark.parametrize("size", SIZES)
-def test_desempenho_bom_sintetico(logged_client: TestClient, storage_settings: Settings, size: int) -> None:
+def test_desempenho_bom_sintetico(
+    logged_client: TestClient, storage_settings: Settings, size: int
+) -> None:
     results: dict[str, Any] = {"componentes_alvo": size}
     raw, lines_count = _csv(size)
     results["linhas_reais"] = lines_count
@@ -93,16 +96,31 @@ def test_desempenho_bom_sintetico(logged_client: TestClient, storage_settings: S
     assert resp.status_code == 201, resp.text
     dataset = resp.json()["dataset"]
 
-    mapping = {"parent_code": "Código pai", "child_code": "Código", "description": "Descrição", "qty": "Qtd", "unit": "Unidade", "rev": "Revisão"}
+    mapping = {
+        "parent_code": "Código pai",
+        "child_code": "Código",
+        "description": "Descrição",
+        "qty": "Qtd",
+        "unit": "Unidade",
+        "rev": "Revisão",
+    }
     t = time.perf_counter()
-    prev = logged_client.post("/api/v1/bom/preview", json={"dataset_id": dataset["id"], "mapping": mapping, "mode": "explicit"})
+    prev = logged_client.post(
+        "/api/v1/bom/preview",
+        json={"dataset_id": dataset["id"], "mapping": mapping, "mode": "explicit"},
+    )
     results["previa_s"] = round(time.perf_counter() - t, 3)
     assert prev.status_code == 200, prev.text
 
     t = time.perf_counter()
     created = logged_client.post(
         "/api/v1/bom/structures",
-        json={"name": f"BOM {name}", "dataset_id": dataset["id"], "mapping": mapping, "mode": "explicit"},
+        json={
+            "name": f"BOM {name}",
+            "dataset_id": dataset["id"],
+            "mapping": mapping,
+            "mode": "explicit",
+        },
     )
     results["criacao_estrutura_s"] = round(time.perf_counter() - t, 3)
     assert created.status_code == 201, created.text
@@ -115,7 +133,9 @@ def test_desempenho_bom_sintetico(logged_client: TestClient, storage_settings: S
     results["linhas_gravadas"] = len(lines)
 
     t = time.perf_counter()
-    explosion = logged_client.post(f"/api/v1/bom/revisions/{rid}/explode", json={"root": "TOP-SYN", "vehicles": "100"})
+    explosion = logged_client.post(
+        f"/api/v1/bom/revisions/{rid}/explode", json={"root": "TOP-SYN", "vehicles": "100"}
+    )
     results["explosao_api_s"] = round(time.perf_counter() - t, 3)
     assert explosion.status_code == 200, explosion.text
     results["codigos_consolidados"] = len(explosion.json()["consolidated"])
