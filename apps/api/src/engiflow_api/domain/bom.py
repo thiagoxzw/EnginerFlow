@@ -701,3 +701,55 @@ def duplicate_subtree(
             )
             n += 1
     return added, mapping
+
+
+@dataclass(frozen=True)
+class KitPart:
+    """Peça de um kit: subconjunto (conta pelos componentes) ou componente folha (conta por ele)."""
+
+    code: str
+    qty: Decimal
+    unit: str | None = None
+
+
+def kit_requirements_for_parts(
+    lines: list[BomLine],
+    parts: list[KitPart],
+    vehicles: Decimal,
+    lot: Decimal,
+) -> dict[tuple[str, str], Decimal]:
+    """Materiais do kit para vehicles × lot kits.
+
+    - Peça com filhos: entram os componentes dela (o próprio conjunto não é material).
+    - Componente folha: entra pela quantidade e unidade informadas (ou a unidade da linha).
+    """
+    if vehicles <= 0 or lot <= 0:
+        raise BomError("Veículos e lote devem ser maiores que zero.")
+    index = _children_index(lines)
+    defined = defined_codes(lines)
+    cycles = find_cycles(lines)
+    memo: dict[str, tuple[dict[tuple[str, str], Decimal], dict[str, int]]] = {}
+    total: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal(0))
+    for part in parts:
+        if part.code not in defined:
+            raise BomError(f"Componente '{part.code}' do kit não existe nesta estrutura.")
+        if any(part.code in c for c in cycles):
+            raise BomError(f"Ciclo envolvendo '{part.code}': kit recusado.")
+        if part.qty <= 0:
+            raise BomError(f"Quantidade por kit de '{part.code}' deve ser maior que zero.")
+        if index.get(part.code):
+            qty, _ = _requirements(index, part.code, memo)
+            for key, value in qty.items():
+                total[key] += value * part.qty
+        else:
+            unit = unit_key(part.unit) if part.unit else _line_unit(lines, part.code)
+            total[(part.code, unit)] += part.qty
+    factor = vehicles * lot
+    return {key: value * factor for key, value in total.items()}
+
+
+def _line_unit(lines: list[BomLine], code: str) -> str:
+    for line in lines:
+        if line.child == code:
+            return unit_key(line.unit)
+    return NO_UNIT

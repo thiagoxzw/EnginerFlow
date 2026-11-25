@@ -21,12 +21,14 @@ from engiflow_api.domain.bom import (
     MODE_LEVEL,
     BomError,
     BomLine,
+    KitPart,
     compare,
     defined_codes,
     duplicate_subtree,
     explode,
     find_cycles,
-    kit_requirements,
+    kit_requirements_for_parts,
+    unit_key,
     validate,
 )
 from engiflow_api.domain.errors import DomainError
@@ -689,9 +691,14 @@ def do_kit(
     db: DbSession, revision_id: str, parts: list[dict[str, str]], vehicles: Decimal, lot: Decimal
 ) -> dict[str, Any]:
     lines = load_lines(db, revision_id)
-    pairs = [(p["code"], parse_decimal(p["qty"]) or Decimal(0)) for p in parts]
+    kit_parts = [
+        KitPart(
+            code=p["code"], qty=parse_decimal(p["qty"]) or Decimal(0), unit=p.get("unit") or None
+        )
+        for p in parts
+    ]
     try:
-        total = kit_requirements(lines, pairs, vehicles, lot)
+        total = kit_requirements_for_parts(lines, kit_parts, vehicles, lot)
     except BomError as exc:
         raise DomainError(str(exc)) from exc
     return {
@@ -702,3 +709,107 @@ def do_kit(
             for (code, unit), qty in sorted(total.items())
         ],
     }
+
+
+KIT_FIELDS = ("code", "qty", "unit", "description")
+
+
+def kit_rows_from_dataset(
+    db: DbSession,
+    structure_id: str,
+    dataset: Dataset,
+    mapping: dict[str, str],
+) -> dict[str, Any]:
+    """Prévia de kit a partir de uma tabela do Data Studio (CSV ou XLSX já importados).
+
+    Campos: código (obrigatório), quantidade (obrigatória), unidade e descrição (opcionais).
+    Linhas com o mesmo código e unidade são somadas e isso é informado. Nada é gravado aqui.
+    """
+    columns, rows = read_dataset(db, dataset)
+    unknown = sorted(set(mapping) - set(KIT_FIELDS))
+    if unknown:
+        raise DomainError(f"Campos desconhecidos no kit: {', '.join(unknown)}.")
+    for field in ("code", "qty"):
+        if field not in mapping:
+            raise DomainError(f"Campo obrigatório sem coluna: {field}.")
+        if mapping[field] not in columns:
+            raise DomainError(f"Coluna '{mapping[field]}' não existe na tabela.")
+    index = {field: columns.index(col) for field, col in mapping.items() if col in columns}
+    structure = get_structure(db, structure_id)
+    lines = load_lines(db, structure.current_revision_id or "")
+    known = defined_codes(lines)
+    issues: list[dict[str, Any]] = []
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for row_number, values in rows:
+        code = _clean_code(_cell(values, index.get("code")))
+        qty_text = _clean_text(_cell(values, index.get("qty")))
+        unit = _clean_text(_cell(values, index.get("unit")))
+        if not code:
+            issues.append({"severity": "erro", "row": row_number, "message": "Linha sem código."})
+            continue
+        qty = parse_decimal(qty_text)
+        if qty is None or qty <= 0:
+            issues.append(
+                {
+                    "severity": "erro",
+                    "row": row_number,
+                    "code": code,
+                    "message": f"Quantidade inválida: '{qty_text or ''}'.",
+                }
+            )
+            continue
+        if code not in known:
+            issues.append(
+                {
+                    "severity": "erro",
+                    "row": row_number,
+                    "code": code,
+                    "message": "Código não existe nesta estrutura.",
+                }
+            )
+        key = (code, unit_key(unit) if unit else "")
+        if key in merged:
+            merged[key]["qty"] = merged[key]["qty"] + qty
+            issues.append(
+                {
+                    "severity": "informação",
+                    "row": row_number,
+                    "code": code,
+                    "message": "Mesmo código e unidade: quantidades somadas.",
+                }
+            )
+        else:
+            merged[key] = {
+                "code": code,
+                "qty": qty,
+                "unit": unit,
+                "description": _clean_text(_cell(values, index.get("description"))),
+            }
+    parts = [
+        {
+            "code": p["code"],
+            "qty": format_decimal(p["qty"]),
+            "unit": p["unit"],
+            "description": p["description"],
+        }
+        for p in merged.values()
+    ]
+    return {"parts": parts, "issues": issues, "row_count": len(rows)}
+
+
+def add_kit_from_dataset(
+    db: DbSession,
+    structure: m.BomStructure,
+    name: str,
+    dataset: Dataset,
+    mapping: dict[str, str],
+) -> m.BomKit:
+    preview_data = kit_rows_from_dataset(db, structure.id, dataset, mapping)
+    errors = [i for i in preview_data["issues"] if i["severity"] == "erro"]
+    if errors:
+        raise DomainError(
+            f"A tabela tem {len(errors)} erro(s) de kit. Corrija antes de criar o kit."
+        )
+    if not preview_data["parts"]:
+        raise DomainError("A tabela não tem componentes válidos para o kit.")
+    return add_kit(db, structure, name, preview_data["parts"])

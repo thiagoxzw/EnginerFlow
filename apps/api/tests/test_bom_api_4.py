@@ -329,3 +329,95 @@ def test_duplicacao_completa_pela_api_cria_nova_revisao_com_descendentes(
     assert {c["code"]: Decimal(c["qty"]) for c in base["consolidated"]}["COMP-SYN-MOT"] == Decimal(
         9
     )
+
+
+def test_kit_importado_de_tabela_tem_previa_erros_e_calculo_de_folhas(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    created = _structure(logged_client)
+    sid = created["structure"]["id"]
+    rid = created["revision_id"]
+    kit_csv = (
+        "Código;Quantidade;Unidade;Descrição\n"
+        "COMP-SYN-MOT;2;UN;Motor sintético\n"
+        "PARAF-SYN-M8;3;UN;Parafuso M8\n"
+        "PARAF-SYN-M8;1;UN;Parafuso M8 (mesmo código, somado)\n"
+    ).encode()
+    ds = _import(logged_client, _unique("SYN-kit"), kit_csv)
+    mapping = {"code": "Código", "qty": "Quantidade", "unit": "Unidade", "description": "Descrição"}
+    preview = logged_client.post(
+        f"/api/v1/bom/structures/{sid}/kits/import/preview",
+        json={"dataset_id": ds["id"], "mapping": mapping},
+    ).json()
+    parts = {p["code"]: p for p in preview["parts"]}
+    assert parts["PARAF-SYN-M8"]["qty"] == "4"  # somado
+    assert parts["COMP-SYN-MOT"]["unit"] == "UN"
+    severities = {i["severity"] for i in preview["issues"]}
+    assert severities == {"informação"}  # só a soma; nenhum código inválido nesta tabela
+
+    created_kit = logged_client.post(
+        f"/api/v1/bom/structures/{sid}/kits/import",
+        json={"name": "Kit importado SYN", "dataset_id": ds["id"], "mapping": mapping},
+    )
+    assert created_kit.status_code == 201, created_kit.text
+    calc = logged_client.post(
+        f"/api/v1/bom/revisions/{rid}/kit-calc",
+        json={"parts": [p for p in created_kit.json()["parts"]], "vehicles": "10", "lot": "1"},
+    ).json()
+    materials = {(m["code"], m["unit"]): Decimal(m["qty"]) for m in calc["materials"]}
+    # Peças folha entram por si: motor 2 × 10 = 20; parafuso 4 × 10 = 40.
+    assert materials[("COMP-SYN-MOT", "UN")] == Decimal(20)
+    assert materials[("PARAF-SYN-M8", "UN")] == Decimal(40)
+
+
+def test_kit_importado_com_erro_nao_e_criado(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    created = _structure(logged_client)
+    sid = created["structure"]["id"]
+    bad_csv = "Código;Quantidade\nCOMP-SYN-MOT;abc\n".encode()
+    ds = _import(logged_client, _unique("SYN-kit-ruim"), bad_csv)
+    resp = logged_client.post(
+        f"/api/v1/bom/structures/{sid}/kits/import",
+        json={
+            "name": "Kit ruim",
+            "dataset_id": ds["id"],
+            "mapping": {"code": "Código", "qty": "Quantidade"},
+        },
+    )
+    assert resp.status_code in (400, 422), resp.text
+    listed = logged_client.get(f"/api/v1/bom/structures/{sid}/kits").json()
+    assert all(k["name"] != "Kit ruim" for k in listed)
+
+
+def test_kit_com_subconjunto_conta_componentes_e_nao_o_proprio_conjunto(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    created = _structure(logged_client)
+    rid = created["revision_id"]
+    calc = logged_client.post(
+        f"/api/v1/bom/revisions/{rid}/kit-calc",
+        json={"parts": [{"code": "CONJ-SYN-TRAC", "qty": "1"}], "vehicles": "1", "lot": "1"},
+    ).json()
+    codes = {m["code"] for m in calc["materials"]}
+    assert "CONJ-SYN-TRAC" not in codes
+    assert "COMP-SYN-MOT" in codes
+
+
+def test_kit_com_codigo_fora_da_estrutura_e_recusado(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    created = _structure(logged_client)
+    sid = created["structure"]["id"]
+    ds = _import(
+        logged_client, _unique("SYN-kit-fora"), "Código;Quantidade\nNAO-EXISTE-SYN;1\n".encode()
+    )
+    resp = logged_client.post(
+        f"/api/v1/bom/structures/{sid}/kits/import",
+        json={
+            "name": "Kit fora",
+            "dataset_id": ds["id"],
+            "mapping": {"code": "Código", "qty": "Quantidade"},
+        },
+    )
+    assert resp.status_code in (400, 422), resp.text

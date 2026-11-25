@@ -72,6 +72,7 @@ class CrossIn(BaseModel):
 
 
 class KitPart(BaseModel):
+    unit: str | None = Field(default=None, max_length=32)
     code: str = Field(min_length=1, max_length=255)
     qty: str = Field(min_length=1, max_length=64)
 
@@ -336,3 +337,42 @@ def _need(value: str | None) -> str:
     if not value:
         raise DomainError("Parâmetro obrigatório ausente para esta exportação.")
     return value
+
+
+class KitImportIn(BaseModel):
+    name: str = Field(default="", max_length=160)
+    dataset_id: str = Field(min_length=1, max_length=36)
+    mapping: dict[str, str] = Field(default_factory=dict)
+
+
+@router.post("/structures/{structure_id}/kits/import/preview")
+def kit_import_preview(
+    structure_id: str, payload: KitImportIn, user: CurrentUser, db: DbDep
+) -> dict[str, Any]:
+    """Prévia da lista de kit (código, quantidade, unidade, descrição). Não grava nada."""
+    app.get_structure(db, structure_id)
+    return app.kit_rows_from_dataset(
+        db, structure_id, _dataset(db, payload.dataset_id), payload.mapping
+    )
+
+
+@router.post("/structures/{structure_id}/kits/import", status_code=201)
+def kit_import(
+    structure_id: str, payload: KitImportIn, request: Request, user: CurrentUser, db: DbDep
+) -> dict[str, Any]:
+    """Cria o kit a partir da tabela, recalculada no servidor, nunca do navegador."""
+    structure = app.get_structure(db, structure_id)
+    kit = app.add_kit_from_dataset(
+        db, structure, payload.name, _dataset(db, payload.dataset_id), payload.mapping
+    )
+    record_event(
+        db,
+        actor=user.email,
+        action="bom.kit.import",
+        resource=f"bom:{structure.id}",
+        result="ok",
+        correlation_id=_correlation(request),
+        details={"kit": kit.id},
+    )
+    db.commit()
+    return {"id": kit.id, "name": kit.name, "parts": kit.parts}
