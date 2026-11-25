@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { CompareTab, CrossSection, ExplodeTab, HistoryTab, KitsTab, ValidateTab } from "@/components/bom/bom-analysis";
 import { ImportAssistant } from "@/components/bom/bom-import";
+import { KitDraft, KitFromTable, type DraftPart } from "@/components/bom/bom-kit-import";
 import { TreeView } from "@/components/bom/bom-tree-view";
 import { getBomLines, listBomStructures, setBomCurrent, type BomStructure } from "@/lib/bom";
 import { topLines } from "@/lib/bom-tree";
@@ -33,6 +34,7 @@ export function BomView() {
   const [tab, setTab] = useState<TabId>("visao");
   const [focusLine, setFocusLine] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [kitDraft, setKitDraft] = useState<DraftPart[]>([]);
 
   const structure: BomStructure | undefined = structures.data?.find((s) => s.id === storedId) ?? structures.data?.[0];
   const revisionId = workingRevision ?? structure?.current_revision_id ?? null;
@@ -168,6 +170,9 @@ export function BomView() {
                     lines={data}
                     focusLine={focusLine}
                     onNewRevision={(id) => { setWorkingRevision(id); void refresh(); }}
+                    onPickPart={(part) =>
+                      setKitDraft((prev) => [...prev, { code: part.code, qty: "1", unit: part.unit, description: part.description }])
+                    }
                   />
                 ) : null}
                 {tab === "explosao" ? <ExplodeTab revisionId={revisionId} lines={data} /> : null}
@@ -185,7 +190,21 @@ export function BomView() {
                     <CrossSection revisionId={revisionId} />
                   </div>
                 ) : null}
-                {tab === "kits" ? <KitsTab structure={structure} revisionId={revisionId} /> : null}
+                {tab === "kits" ? (
+                  <div className="space-y-4">
+                    <KitDraft
+                      structureId={structure.id}
+                      draft={kitDraft}
+                      onChange={setKitDraft}
+                      onSaved={() => void queryClient.invalidateQueries({ queryKey: ["bom-kits", structure.id] })}
+                    />
+                    <KitFromTable
+                      structureId={structure.id}
+                      onSaved={() => void queryClient.invalidateQueries({ queryKey: ["bom-kits", structure.id] })}
+                    />
+                    <KitsTab structure={structure} revisionId={revisionId} />
+                  </div>
+                ) : null}
                 {tab === "historico" ? (
                   <HistoryTab structure={structure} onUse={adopt} onOpen={(id) => { setWorkingRevision(id); setTab("estrutura"); }} />
                 ) : null}

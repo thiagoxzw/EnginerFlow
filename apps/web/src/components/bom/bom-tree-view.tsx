@@ -29,11 +29,14 @@ export function TreeView({
   revisionId,
   lines,
   onNewRevision,
+  onPickPart,
   focusLine = null,
 }: {
   revisionId: string;
   lines: BomLine[];
   onNewRevision: (revisionId: string) => void;
+  /** Adiciona um componente ao rascunho de kit (seleção direta pela árvore). */
+  onPickPart?: (part: { code: string; unit: string | null; description: string | null }) => void;
   /** Linha indicada pela validação: vem selecionada, com o caminho até ela expandido. */
   focusLine?: number | null;
 }) {
@@ -162,6 +165,11 @@ export function TreeView({
                     {row.cycle ? <span className="text-[var(--color-danger)]">ciclo</span> : null}
                     {row.line.inferred_parent ? <span className="text-xs text-[var(--color-muted)]">pai inferido</span> : null}
                   </button>
+                  {onPickPart && row.line.child ? (
+                    <button type="button" className={buttonClass} onClick={() => onPickPart({ code: row.line.child as string, unit: row.line.unit, description: row.line.description })}>
+                      + kit
+                    </button>
+                  ) : null}
                   <span className="whitespace-nowrap font-mono text-xs" title="Quantidade local">
                     {row.qtyLocal ?? "(ausente)"} {row.line.unit ?? ""}
                   </span>
@@ -421,9 +429,18 @@ function Details({
             type="button"
             className={buttonClass}
             disabled={!newCode.trim() || !line.child}
-            onClick={() => void apply([{ op: "duplicate_subassembly", code: line.child ?? "", new_code: newCode.trim() }], "Conjunto duplicado (filhos diretos incluídos).")}
+            onClick={() => void apply([{ op: "duplicate_subassembly", code: line.child ?? "", new_code: newCode.trim() }], "Filhos diretos duplicados sob o novo código. Subconjuntos internos continuam compartilhados.")}
           >
-            Duplicar conjunto
+            Duplicar só filhos diretos
+          </button>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={!newCode.trim() || !line.child}
+            title="Copia o conjunto e todos os descendentes. Subconjuntos internos recebem código com sufixo -CP."
+            onClick={() => void apply([{ op: "duplicate_subtree", code: line.child ?? "", new_code: newCode.trim(), suffix: "-CP" }], "Conjunto completo duplicado (descendentes incluídos; subconjuntos internos com sufixo -CP).")}
+          >
+            Duplicar conjunto completo
           </button>
         </div>
         <div className="flex gap-2">

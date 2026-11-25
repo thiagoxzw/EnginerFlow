@@ -109,9 +109,10 @@ export interface BomCross {
 }
 
 export interface BomKit {
+  // peças: subconjuntos ou componentes folha; unidade opcional
   id: string;
   name: string;
-  parts: { code: string; qty: string }[];
+  parts: { code: string; qty: string; unit?: string | null }[];
 }
 
 export type BomEdit = Record<string, string | number | undefined> & { op: string };
@@ -218,4 +219,34 @@ export function kitCalc(
 export function bomExportUrl(revisionId: string, params: Record<string, string>) {
   const query = new URLSearchParams(params).toString();
   return `/api/v1/bom/revisions/${revisionId}/export?${query}`;
+}
+
+export interface KitPartIn {
+  code: string;
+  qty: string;
+  unit?: string | null;
+  description?: string | null;
+}
+
+export interface KitImportPreview {
+  parts: { code: string; qty: string; unit: string | null; description: string | null }[];
+  issues: { severity: "erro" | "alerta" | "informação"; row: number; code?: string; message: string }[];
+  row_count: number;
+}
+
+export function previewKitFromTable(structureId: string, body: { dataset_id: string; mapping: Record<string, string> }) {
+  return apiFetch<KitImportPreview>(`/api/v1/bom/structures/${structureId}/kits/import/preview`, {
+    method: "POST",
+    body: JSON.stringify({ ...body, name: "" }),
+  });
+}
+
+export function createKitFromTable(
+  structureId: string,
+  body: { name: string; dataset_id: string; mapping: Record<string, string> },
+) {
+  return apiFetch<BomKit>(`/api/v1/bom/structures/${structureId}/kits/import`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
