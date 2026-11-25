@@ -33,7 +33,12 @@ from engiflow_api.domain.errors import DomainError
 from engiflow_api.domain.query import MAX_SEARCH, FilterIn, TableQuery
 from engiflow_api.domain.tabular import CodeComparison, detect_header_index
 from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_bytes
-from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
+from engiflow_api.infrastructure.models import (
+    CrossingRun,
+    CrossingRunSource,
+    Dataset,
+    DatasetVersionRow,
+)
 from engiflow_api.infrastructure.readers import (
     ImportLimits,
     detect_kind_file,
@@ -66,6 +71,7 @@ class DatasetSummary(BaseModel):
     warnings: list[str]
     created_at: datetime
     source_kind: str = "import"
+    derived_run_id: str | None = None
 
 
 class DatasetDetail(DatasetSummary):
@@ -153,6 +159,7 @@ def _summary(dataset: Dataset) -> DatasetSummary:
         warnings=list(dataset.warnings),
         created_at=dataset.created_at,
         source_kind=dataset.source_kind,
+        derived_run_id=dataset.derived_run_id,
     )
 
 
@@ -294,6 +301,85 @@ def detail(dataset_id: str, user: CurrentUser, db: DbDep) -> DatasetDetail:
     preview = [dict(zip(dataset.columns, values[0], strict=False)) for values in preview_rows]
     base = _summary(dataset).model_dump()
     return DatasetDetail(**base, preview=preview)
+
+
+class LineageSourceOut(BaseModel):
+    role: str
+    dataset_id: str
+    dataset_name: str
+    version_id: str
+    metadata_version_id: str
+    # Origem ainda existe e não está excluída logicamente. A derivada não muda em nenhum caso.
+    still_active: bool
+
+
+class LineageOut(BaseModel):
+    dataset_id: str
+    run_id: str
+    operation: str
+    operation_version: int
+    params: dict[str, Any]
+    policy: dict[str, Any]
+    counts: dict[str, Any]
+    params_sha256: str
+    result_sha256: str
+    row_count: int
+    actor: str
+    created_at: datetime
+    sources: list[LineageSourceOut]
+
+
+_OPERATION_NAMES = {
+    "lookup": "Super-PROCV",
+    "join": "Junção",
+    "aggregate": "Agregação",
+    "compare": "Comparação por chave",
+}
+
+
+@router.get("/{dataset_id}/lineage", response_model=LineageOut)
+def lineage(dataset_id: str, user: CurrentUser, db: DbDep) -> LineageOut:
+    """Rastreabilidade de uma tabela derivada: operação, parâmetros, origens, contagens e hash."""
+    dataset = get_dataset(db, dataset_id)
+    if not dataset.derived_run_id:
+        raise DomainError("Esta tabela não foi derivada de um cruzamento.")
+    run = db.get(CrossingRun, dataset.derived_run_id)
+    if run is None:
+        raise DomainError("Execução de origem não encontrada.")
+    sources = db.scalars(
+        select(CrossingRunSource)
+        .where(CrossingRunSource.run_id == run.id)
+        .order_by(CrossingRunSource.role)
+    ).all()
+    active = {
+        d.id: d.deleted_at is None
+        for d in db.scalars(select(Dataset).where(Dataset.id.in_([s.dataset_id for s in sources])))
+    }
+    return LineageOut(
+        dataset_id=dataset.id,
+        run_id=run.id,
+        operation=_OPERATION_NAMES.get(run.kind, run.kind),
+        operation_version=run.operation_version,
+        params=dict(run.params),
+        policy=dict(run.policy),
+        counts=dict(run.counts),
+        params_sha256=run.params_sha256,
+        result_sha256=run.result_sha256,
+        row_count=run.row_count,
+        actor=run.actor,
+        created_at=run.created_at,
+        sources=[
+            LineageSourceOut(
+                role=s.role,
+                dataset_id=s.dataset_id,
+                dataset_name=s.dataset_name,
+                version_id=s.version_id,
+                metadata_version_id=s.metadata_version_id,
+                still_active=active.get(s.dataset_id, False),
+            )
+            for s in sources
+        ],
+    )
 
 
 def _parse_filters(raw: str | None) -> list[FilterIn]:

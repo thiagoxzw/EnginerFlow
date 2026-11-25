@@ -260,6 +260,8 @@ class CrossingRun(Base):
     params_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     policy: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     counts: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    # Chave enviada pelo cliente (Idempotency-Key). Única: repetir a chave devolve a mesma execução.
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
     result_dataset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     result_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False)

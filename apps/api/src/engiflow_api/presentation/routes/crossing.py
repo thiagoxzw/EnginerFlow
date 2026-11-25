@@ -1,21 +1,27 @@
 """Rotas de cruzamento entre tabelas (2B.3).
 
-- `lookup/preview`: prévia, não grava nada.
-- `lookup/derive`: executa e grava uma tabela derivada com rastreabilidade (nova tabela).
+- `*/preview`: prévia, não grava nada.
+- `*/derive`: executa e grava uma tabela derivada com rastreabilidade (nova tabela).
+  Aceita o cabeçalho `Idempotency-Key`: repetir a chave com os mesmos parâmetros devolve a mesma
+  tabela (sem duplicar); com parâmetros diferentes, responde 409.
 - `lookup/export`: exporta o resultado (CSV ou XLSX) sem gravar nada.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Header, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.application.crossing import (
     AggregateSpec,
     ComparisonSpec,
+    DerivedOutcome,
     LookupSpec,
     create_derived_aggregate,
     create_derived_comparison,
@@ -32,6 +38,8 @@ from engiflow_api.infrastructure.exporters import Sheet, to_csv_bytes, to_xlsx_b
 from engiflow_api.presentation.deps import CurrentUser, DbDep
 
 router = APIRouter(prefix="/api/v1/crossing", tags=["cruzamento"])
+
+IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", max_length=128)]
 
 _MEDIA = {
     "csv": "text/csv; charset=utf-8",
@@ -83,6 +91,33 @@ def _correlation(request: Request) -> str | None:
     return value
 
 
+def _derived_out(outcome: DerivedOutcome) -> DerivedOut:
+    return DerivedOut(
+        dataset_id=outcome.dataset.id,
+        name=outcome.dataset.name,
+        run_id=outcome.run.id,
+        row_count=outcome.row_count,
+        counts={k: v for k, v in outcome.counts.items()},
+        result_sha256=outcome.run.result_sha256,
+    )
+
+
+def _derive(db: DbSession, make: Callable[[], DerivedOutcome]) -> DerivedOut:
+    """Cria a derivada e confirma. Colisão de chave de idempotência (outro pedido gravou antes)
+    desfaz e repete uma vez: a segunda tentativa encontra a execução gravada e a devolve.
+
+    `make` carrega as tabelas de origem a cada tentativa, porque o rollback invalida os objetos.
+    """
+    try:
+        outcome = make()
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        outcome = make()
+        db.commit()
+    return _derived_out(outcome)
+
+
 @router.post("/lookup/preview", response_model=LookupPreviewOut)
 def lookup_preview(
     payload: LookupIn,
@@ -106,26 +141,25 @@ def lookup_preview(
 
 
 @router.post("/lookup/derive", response_model=DerivedOut, status_code=201)
-def lookup_derive(payload: LookupIn, request: Request, user: CurrentUser, db: DbDep) -> DerivedOut:
-    left = get_dataset(db, payload.left_id)
-    right = get_dataset(db, payload.right_id)
-    outcome = create_derived_lookup(
-        db,
-        left,
-        right,
-        _spec(payload),
-        actor=user.email,
-        correlation_id=_correlation(request),
-    )
-    db.commit()
-    return DerivedOut(
-        dataset_id=outcome.dataset.id,
-        name=outcome.dataset.name,
-        run_id=outcome.run.id,
-        row_count=outcome.row_count,
-        counts={k: v for k, v in outcome.counts.items()},
-        result_sha256=outcome.run.result_sha256,
-    )
+def lookup_derive(
+    payload: LookupIn,
+    request: Request,
+    user: CurrentUser,
+    db: DbDep,
+    idempotency_key: IdempotencyKey = None,
+) -> DerivedOut:
+    def make() -> DerivedOutcome:
+        return create_derived_lookup(
+            db,
+            get_dataset(db, payload.left_id),
+            get_dataset(db, payload.right_id),
+            _spec(payload),
+            actor=user.email,
+            correlation_id=_correlation(request),
+            idempotency_key=idempotency_key,
+        )
+
+    return _derive(db, make)
 
 
 @router.post("/lookup/export")
@@ -203,28 +237,27 @@ def join_preview(
 
 
 @router.post("/join/derive", response_model=DerivedOut, status_code=201)
-def join_derive(payload: JoinIn, request: Request, user: CurrentUser, db: DbDep) -> DerivedOut:
-    left = get_dataset(db, payload.left_id)
-    right = get_dataset(db, payload.right_id)
-    outcome = create_derived_join(
-        db,
-        left,
-        right,
-        tuple(payload.left_keys),
-        tuple(payload.right_keys),
-        payload.join_type,
-        actor=user.email,
-        correlation_id=_correlation(request),
-    )
-    db.commit()
-    return DerivedOut(
-        dataset_id=outcome.dataset.id,
-        name=outcome.dataset.name,
-        run_id=outcome.run.id,
-        row_count=outcome.row_count,
-        counts={k: v for k, v in outcome.counts.items()},
-        result_sha256=outcome.run.result_sha256,
-    )
+def join_derive(
+    payload: JoinIn,
+    request: Request,
+    user: CurrentUser,
+    db: DbDep,
+    idempotency_key: IdempotencyKey = None,
+) -> DerivedOut:
+    def make() -> DerivedOutcome:
+        return create_derived_join(
+            db,
+            get_dataset(db, payload.left_id),
+            get_dataset(db, payload.right_id),
+            tuple(payload.left_keys),
+            tuple(payload.right_keys),
+            payload.join_type,
+            actor=user.email,
+            correlation_id=_correlation(request),
+            idempotency_key=idempotency_key,
+        )
+
+    return _derive(db, make)
 
 
 class AggregateMeasureIn(BaseModel):
@@ -267,25 +300,26 @@ def aggregate_preview(payload: AggregateIn, user: CurrentUser, db: DbDep) -> Agg
 
 @router.post("/aggregate/derive", response_model=DerivedOut, status_code=201)
 def aggregate_derive(
-    payload: AggregateIn, request: Request, user: CurrentUser, db: DbDep
+    payload: AggregateIn,
+    request: Request,
+    user: CurrentUser,
+    db: DbDep,
+    idempotency_key: IdempotencyKey = None,
 ) -> DerivedOut:
-    dataset = get_dataset(db, payload.dataset_id)
-    outcome = create_derived_aggregate(
-        db,
-        dataset,
-        _aggregate_spec(payload),
-        actor=user.email,
-        correlation_id=_correlation(request),
-    )
-    db.commit()
-    return DerivedOut(
-        dataset_id=outcome.dataset.id,
-        name=outcome.dataset.name,
-        run_id=outcome.run.id,
-        row_count=outcome.row_count,
-        counts={k: v for k, v in outcome.counts.items()},
-        result_sha256=outcome.run.result_sha256,
-    )
+    def make() -> DerivedOutcome:
+        return create_derived_aggregate(
+            db,
+            get_dataset(db, payload.dataset_id),
+            _aggregate_spec(payload),
+            actor=user.email,
+            correlation_id=_correlation(request),
+            idempotency_key=idempotency_key,
+        )
+
+    return _derive(db, make)
+
+
+CompareMode = Literal["exato", "normalizado", "numerico", "descricao_tecnica"]
 
 
 class CompareIn(BaseModel):
@@ -293,6 +327,8 @@ class CompareIn(BaseModel):
     right_id: str = Field(min_length=1, max_length=36)
     left_keys: list[str] = Field(min_length=1, max_length=10)
     right_keys: list[str] = Field(min_length=1, max_length=10)
+    # Modo por coluna comparada. Colunas não citadas usam "exato" (sem equivalência numérica).
+    modes: dict[str, CompareMode] = Field(default_factory=dict, max_length=50)
 
 
 class CompareOut(BaseModel):
@@ -303,7 +339,11 @@ class CompareOut(BaseModel):
 
 
 def _compare_spec(payload: CompareIn) -> ComparisonSpec:
-    return ComparisonSpec(left_keys=tuple(payload.left_keys), right_keys=tuple(payload.right_keys))
+    return ComparisonSpec(
+        left_keys=tuple(payload.left_keys),
+        right_keys=tuple(payload.right_keys),
+        modes=tuple(payload.modes.items()),
+    )
 
 
 @router.post("/compare/preview", response_model=CompareOut)
@@ -322,24 +362,21 @@ def compare_preview(payload: CompareIn, user: CurrentUser, db: DbDep) -> Compare
 
 @router.post("/compare/derive", response_model=DerivedOut, status_code=201)
 def compare_derive(
-    payload: CompareIn, request: Request, user: CurrentUser, db: DbDep
+    payload: CompareIn,
+    request: Request,
+    user: CurrentUser,
+    db: DbDep,
+    idempotency_key: IdempotencyKey = None,
 ) -> DerivedOut:
-    left = get_dataset(db, payload.left_id)
-    right = get_dataset(db, payload.right_id)
-    outcome = create_derived_comparison(
-        db,
-        left,
-        right,
-        _compare_spec(payload),
-        actor=user.email,
-        correlation_id=_correlation(request),
-    )
-    db.commit()
-    return DerivedOut(
-        dataset_id=outcome.dataset.id,
-        name=outcome.dataset.name,
-        run_id=outcome.run.id,
-        row_count=outcome.row_count,
-        counts={k: v for k, v in outcome.counts.items()},
-        result_sha256=outcome.run.result_sha256,
-    )
+    def make() -> DerivedOutcome:
+        return create_derived_comparison(
+            db,
+            get_dataset(db, payload.left_id),
+            get_dataset(db, payload.right_id),
+            _compare_spec(payload),
+            actor=user.email,
+            correlation_id=_correlation(request),
+            idempotency_key=idempotency_key,
+        )
+
+    return _derive(db, make)

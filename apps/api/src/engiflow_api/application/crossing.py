@@ -22,7 +22,7 @@ from engiflow_api.domain import comparison as cmp_mod
 from engiflow_api.domain import join as jn
 from engiflow_api.domain import lookup as lk
 from engiflow_api.domain.canonical import metadata_sha256, rows_sha256
-from engiflow_api.domain.errors import DomainError
+from engiflow_api.domain.errors import ConflictError, DomainError
 from engiflow_api.infrastructure.models import (
     CrossingRun,
     CrossingRunSource,
@@ -148,6 +148,37 @@ class DerivedOutcome:
     counts: dict[str, int]
 
 
+def _params_sha(params: dict[str, Any]) -> str:
+    params_json = json.dumps(params, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(params_json.encode("utf-8")).hexdigest()
+
+
+def replay_derived(
+    db: DbSession, idempotency_key: str | None, kind: str, params: dict[str, Any]
+) -> DerivedOutcome | None:
+    """Repete o resultado de uma execução anterior com a mesma chave de idempotência.
+
+    - Sem chave: nada a repetir (None).
+    - Mesma chave e mesmos parâmetros: devolve a execução já gravada, sem recalcular nem duplicar.
+    - Mesma chave com parâmetros (ou operação) diferentes: conflito (409).
+    """
+    if not idempotency_key:
+        return None
+    run = db.scalar(select(CrossingRun).where(CrossingRun.idempotency_key == idempotency_key))
+    if run is None:
+        return None
+    if run.kind != kind or run.params_sha256 != _params_sha(params):
+        raise ConflictError(
+            "A chave de idempotência já foi usada com outros parâmetros. Use uma chave nova."
+        )
+    dataset = db.get(Dataset, run.result_dataset_id) if run.result_dataset_id else None
+    if dataset is None:
+        raise ConflictError("A execução anterior não tem tabela derivada. Use uma chave nova.")
+    return DerivedOutcome(
+        dataset=dataset, run=run, row_count=run.row_count, counts=dict(run.counts)
+    )
+
+
 def _canonical_params(spec: LookupSpec, left_id: str, right_id: str) -> dict[str, Any]:
     return {
         "left_id": left_id,
@@ -173,14 +204,15 @@ def store_derived(
     rows: list[list[str | None]],
     actor: str,
     correlation_id: str | None,
+    idempotency_key: str | None = None,
 ) -> DerivedOutcome:
     """Grava o resultado como tabela derivada, com execução e origens congeladas."""
-    params_json = json.dumps(params, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     run = CrossingRun(
         kind=kind,
         operation_version=operation_version,
         params=params,
-        params_sha256=hashlib.sha256(params_json.encode("utf-8")).hexdigest(),
+        params_sha256=_params_sha(params),
+        idempotency_key=idempotency_key,
         policy=dict(params["policy"]),
         counts=counts,
         result_dataset_id=None,
@@ -292,11 +324,15 @@ def create_derived_lookup(
     actor: str,
     correlation_id: str | None,
     max_output_rows: int | None = None,
+    idempotency_key: str | None = None,
 ) -> DerivedOutcome:
     """Executa o Super-PROCV e grava o resultado como tabela derivada, com rastreabilidade."""
+    params = _canonical_params(spec, left.id, right.id)
+    replayed = replay_derived(db, idempotency_key, "lookup", params)
+    if replayed is not None:
+        return replayed
     outcome = run_lookup(db, left, right, spec, max_output_rows=max_output_rows)
     rows = [list(values) for _, values in outcome.result.rows]
-    params = _canonical_params(spec, left.id, right.id)
     counts = {**outcome.result.counts, "lado_consulta_lido": outcome.left_rows_read}
     return store_derived(
         db,
@@ -311,6 +347,7 @@ def create_derived_lookup(
         rows=rows,
         actor=actor,
         correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -383,10 +420,9 @@ def create_derived_join(
     actor: str,
     correlation_id: str | None,
     max_rows: int | None = None,
+    idempotency_key: str | None = None,
 ) -> DerivedOutcome:
     """Executa a junção e grava a derivada. Mesma rastreabilidade do Super-PROCV."""
-    outcome = run_join(db, left, right, left_keys, right_keys, join_type, max_rows=max_rows)
-    plan = outcome.plan
     params: dict[str, Any] = {
         "left_id": left.id,
         "right_id": right.id,
@@ -394,6 +430,11 @@ def create_derived_join(
         "right_keys": list(right_keys),
         "policy": {"join_type": join_type},
     }
+    replayed = replay_derived(db, idempotency_key, "join", params)
+    if replayed is not None:
+        return replayed
+    outcome = run_join(db, left, right, left_keys, right_keys, join_type, max_rows=max_rows)
+    plan = outcome.plan
     counts: dict[str, Any] = {
         "cardinalidade": plan.cardinality,
         "linhas_esquerda": plan.left_rows,
@@ -417,6 +458,7 @@ def create_derived_join(
         rows=outcome.rows,
         actor=actor,
         correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -480,14 +522,18 @@ def create_derived_aggregate(
     *,
     actor: str,
     correlation_id: str | None,
+    idempotency_key: str | None = None,
 ) -> DerivedOutcome:
-    result = run_aggregate(db, dataset, spec)
     params: dict[str, Any] = {
         "dataset_id": dataset.id,
         "group_by": list(spec.group_by),
         "measures": [[name, op] for name, op in spec.measures],
         "policy": {"operation": "aggregate"},
     }
+    replayed = replay_derived(db, idempotency_key, "aggregate", params)
+    if replayed is not None:
+        return replayed
+    result = run_aggregate(db, dataset, spec)
     counts: dict[str, Any] = {"linhas_lidas": result.input_rows, "grupos": len(result.rows)}
     return store_derived(
         db,
@@ -502,6 +548,7 @@ def create_derived_aggregate(
         rows=result.rows,
         actor=actor,
         correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -512,6 +559,8 @@ COMPARISON_OPERATION_VERSION = 1
 class ComparisonSpec:
     left_keys: tuple[str, ...]
     right_keys: tuple[str, ...]
+    # Modo por coluna comparada (nome, modo). Colunas não citadas usam "exato".
+    modes: tuple[tuple[str, str], ...] = ()
 
 
 def _shared_columns(
@@ -530,9 +579,10 @@ def _shared_columns(
     return out
 
 
-def run_comparison(
-    db: DbSession, left: Dataset, right: Dataset, spec: ComparisonSpec
-) -> cmp_mod.ComparisonResult:
+def _comparison_plan(
+    left: Dataset, right: Dataset, spec: ComparisonSpec
+) -> tuple[list[int], list[int], list[tuple[int, int, str]], dict[str, str]]:
+    """Índices das chaves, colunas comparadas e modo de cada uma (valida nomes e modos)."""
     left_cols = list(left.columns)
     right_cols = list(right.columns)
     left_key = _indexes(left_cols, spec.left_keys, "a tabela de origem")
@@ -540,10 +590,28 @@ def run_comparison(
     if len(left_key) != len(right_key):
         raise DomainError("As chaves das duas tabelas devem ter o mesmo número de colunas.")
     shared = _shared_columns(left_cols, right_cols, left_key, right_key)
+    shared_names = {name.casefold(): name for _, _, name in shared}
+    modes = {name: cmp_mod.MODE_EXACT for _, _, name in shared}
+    for column, mode in spec.modes:
+        canonical = shared_names.get(column.casefold())
+        if canonical is None:
+            raise DomainError(
+                f"A coluna '{column}' não é comparada (existe nas duas tabelas e não é chave)."
+            )
+        if mode not in cmp_mod.MODES:
+            raise DomainError(f"Modo de comparação desconhecido: '{mode}'.")
+        modes[canonical] = mode
+    return left_key, right_key, shared, modes
+
+
+def run_comparison(
+    db: DbSession, left: Dataset, right: Dataset, spec: ComparisonSpec
+) -> cmp_mod.ComparisonResult:
+    left_key, right_key, shared, modes = _comparison_plan(left, right, spec)
     left_rows = (list(values) for _, values in _stream_current(db, left))
     right_rows = (list(values) for _, values in _stream_current(db, right))
     try:
-        return cmp_mod.compare(left_rows, right_rows, left_key, right_key, shared)
+        return cmp_mod.compare(left_rows, right_rows, left_key, right_key, shared, modes=modes)
     except ValueError as exc:
         raise DomainError(str(exc)) from exc
 
@@ -556,15 +624,24 @@ def create_derived_comparison(
     *,
     actor: str,
     correlation_id: str | None,
+    idempotency_key: str | None = None,
 ) -> DerivedOutcome:
-    result = run_comparison(db, left, right, spec)
+    _, _, _, modes = _comparison_plan(left, right, spec)
     params: dict[str, Any] = {
         "left_id": left.id,
         "right_id": right.id,
         "left_keys": list(spec.left_keys),
         "right_keys": list(spec.right_keys),
-        "policy": {"operation": "compare"},
+        # Chaves: sempre texto canônico, sem equivalência numérica.
+        "chaves": "texto canônico (NFC, sem alterar zeros, caixa ou símbolos)",
+        # Modo efetivo de cada coluna comparada, para rastrear exatamente o critério usado.
+        "modos": dict(sorted(modes.items())),
+        "policy": {"operation": "compare", "modos": dict(sorted(modes.items()))},
     }
+    replayed = replay_derived(db, idempotency_key, "compare", params)
+    if replayed is not None:
+        return replayed
+    result = run_comparison(db, left, right, spec)
     return store_derived(
         db,
         left,
@@ -578,4 +655,5 @@ def create_derived_comparison(
         rows=result.rows,
         actor=actor,
         correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
     )
