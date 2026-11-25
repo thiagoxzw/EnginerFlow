@@ -41,17 +41,29 @@ async function openFreshTable(page: Page): Promise<string> {
   return name;
 }
 
+// Toda consulta fica dentro da região "Dados": a página também tem a tabela de prévia do upload.
+function grade(page: Page) {
+  return page.getByRole("region", { name: "Dados" });
+}
+
 function cell(page: Page, column: string, row: number) {
-  return page.getByRole("cell", { name: `${column}, linha ${row}`, exact: true });
+  return grade(page).getByRole("cell", { name: `${column}, linha ${row}`, exact: true });
 }
 
-/** Clique com botão direito no número da linha (segunda célula da linha, após o checkbox). */
+/** Cabeçalho da coluna (o botão de ordenação tem o nome da coluna). */
+function header(page: Page, name: string | RegExp) {
+  return grade(page)
+    .locator("thead th")
+    .filter({ has: page.getByRole("button", typeof name === "string" ? { name, exact: true } : { name }) });
+}
+
+/** Clique com botão direito no número da linha: segunda célula da linha de dados (após o checkbox). */
 async function rowMenu(page: Page, dataRowIndex: number) {
-  await page.getByRole("row").nth(dataRowIndex).getByRole("cell").nth(1).click({ button: "right" });
+  await grade(page).locator("tbody tr").nth(dataRowIndex).locator("td").nth(1).click({ button: "right" });
 }
 
-async function columnMenu(page: Page, header: RegExp) {
-  await page.getByRole("columnheader", { name: header }).click({ button: "right" });
+async function columnMenu(page: Page, name: string | RegExp) {
+  await header(page, name).click({ button: "right" });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -74,7 +86,7 @@ test("seleção por teclado (Shift+seta) limpa o intervalo em uma operação e D
 
 test("inserir linha abaixo renumera na ordem exibida; Desfazer restaura a numeração", async ({ page }) => {
   await openFreshTable(page);
-  await rowMenu(page, 1); // linha 2 (Parafuso)
+  await rowMenu(page, 0); // linha 2 (Parafuso)
   await page.getByRole("menuitem", { name: "Inserir linha abaixo" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Linha vazia inserida após a linha 2" })).toBeVisible();
   // Porca passa de linha 3 para linha 4; a nova linha 3 fica vazia.
@@ -87,7 +99,7 @@ test("inserir linha abaixo renumera na ordem exibida; Desfazer restaura a numera
 
 test("duplicar linha coloca a cópia logo abaixo do original", async ({ page }) => {
   await openFreshTable(page);
-  await rowMenu(page, 1);
+  await rowMenu(page, 0);
   await page.getByRole("menuitem", { name: "Duplicar linha" }).click();
   await expect(cell(page, "SYN-Descrição", 2)).toContainText("Parafuso");
   await expect(cell(page, "SYN-Descrição", 3)).toContainText("Parafuso");
@@ -98,16 +110,16 @@ test("duplicar e excluir coluna são operações versionadas e desfazíveis", as
   await openFreshTable(page);
   await columnMenu(page, /^SYN-Descrição/);
   await page.getByRole("menuitem", { name: "Duplicar coluna" }).click();
-  await expect(page.getByRole("columnheader", { name: /SYN-Descrição \(cópia\)/ })).toBeVisible();
+  await expect(header(page, /SYN-Descrição \(cópia\)/)).toBeVisible();
   await page.getByRole("button", { name: "Desfazer (Ctrl+Z)" }).click();
-  await expect(page.getByRole("columnheader", { name: /SYN-Descrição \(cópia\)/ })).toHaveCount(0);
+  await expect(header(page, /SYN-Descrição \(cópia\)/)).toHaveCount(0);
 
   await columnMenu(page, /^Qtd/);
   await page.getByRole("menuitem", { name: "Excluir coluna" }).click();
   await page.getByRole("button", { name: "Confirmar exclusão" }).click();
-  await expect(page.getByRole("columnheader", { name: /^Qtd/ })).toHaveCount(0);
+  await expect(header(page, /^Qtd/)).toHaveCount(0);
   await page.getByRole("button", { name: "Desfazer (Ctrl+Z)" }).click();
-  await expect(page.getByRole("columnheader", { name: /^Qtd/ })).toBeVisible();
+  await expect(header(page, /^Qtd/)).toBeVisible();
 });
 
 test("edição em massa grava um valor em todas as células do intervalo", async ({ page }) => {
@@ -148,7 +160,7 @@ test("reordenar colunas persiste após atualizar e não altera células de outra
   await columnMenu(page, /^SYN-Descrição/);
   await page.getByRole("menuitem", { name: "Mover para a esquerda" }).click();
   const descricaoAntesDoCodigo = async () => {
-    const titulos = (await page.locator("thead th").allInnerTexts()).map((t) => t.trim());
+    const titulos = (await grade(page).locator("thead th").allInnerTexts()).map((t) => t.trim());
     return titulos.findIndex((t) => t.startsWith("SYN-Descrição")) < titulos.findIndex((t) => t.startsWith("SYN-Código"));
   };
   await expect.poll(descricaoAntesDoCodigo).toBe(true);
@@ -166,7 +178,7 @@ test("seleção de linha é descartada após operação estrutural (renumeraçã
   const marcada = page.getByRole("checkbox", { name: "Selecionar linha 2" });
   await marcada.check();
   await expect(marcada).toBeChecked();
-  await rowMenu(page, 3); // linha 4
+  await rowMenu(page, 2); // linha 4
   await page.getByRole("menuitem", { name: "Inserir linha abaixo" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Linha vazia inserida" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Selecionar linha 2" })).not.toBeChecked();
