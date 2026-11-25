@@ -12,7 +12,7 @@ Regras de cálculo:
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Literal
 
@@ -636,3 +636,68 @@ def consolidated_list(lines: list[BomLine]) -> list[dict[str, object]]:
         }
         for code, unit in sorted(occ)
     ]
+
+
+def duplicate_subtree(
+    lines: list[BomLine],
+    code: str,
+    new_code: str,
+    suffix: str,
+    next_no: int,
+) -> tuple[list[BomLine], dict[str, str]]:
+    """Duplicação COMPLETA de um subconjunto, com todos os descendentes.
+
+    - O conjunto recebe `new_code` e fica nos mesmos pais do original.
+    - Cada subconjunto interno (com filhos) recebe código novo: código + `suffix`, para que a cópia
+      tenha relacionamentos internos próprios e nenhum código seja compartilhado indevidamente.
+    - Componentes folha mantêm o código: são o mesmo material.
+    - Quantidades, unidades e propriedades são copiadas sem alteração.
+    Retorna as linhas novas e o mapa código original -> código da cópia.
+    """
+    defined = defined_codes(lines)
+    if code not in defined:
+        raise BomError(f"Conjunto '{code}' não existe nesta estrutura.")
+    if new_code in defined:
+        raise BomError(f"O código '{new_code}' já existe nesta estrutura.")
+    if not suffix:
+        raise BomError("O sufixo dos subconjuntos internos não pode ser vazio.")
+    index = _children_index(lines)
+    # Descendentes (fechamento transitivo) a partir do conjunto.
+    closure: set[str] = set()
+    todo = [code]
+    while todo:
+        current = todo.pop()
+        for line in index.get(current, []):
+            child = line.child or ""
+            if child not in closure:
+                closure.add(child)
+                todo.append(child)
+    subassemblies = {c for c in closure | {code} if index.get(c)}
+    mapping: dict[str, str] = {code: new_code}
+    for sub in sorted(subassemblies - {code}):
+        mapping[sub] = f"{sub}{suffix}"
+    clashes = sorted(c for c in mapping.values() if c in defined)
+    if clashes:
+        listed = ", ".join(clashes[:10])
+        raise BomError(f"Códigos da cópia já existem: {listed}. Escolha outro sufixo.")
+
+    added: list[BomLine] = []
+    n = next_no
+    # 1) O conjunto aparece onde o original aparece (mesmos pais).
+    for line in lines:
+        if line.child == code:
+            added.append(replace(line, line_no=n, child=new_code))
+            n += 1
+    # 2) Todas as linhas internas à subárvore, com pai e filho mapeados.
+    for line in lines:
+        if line.parent in mapping and line.parent is not None and line.parent in subassemblies:
+            added.append(
+                replace(
+                    line,
+                    line_no=n,
+                    parent=mapping[line.parent],
+                    child=mapping.get(line.child or "", line.child),
+                )
+            )
+            n += 1
+    return added, mapping

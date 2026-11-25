@@ -23,6 +23,7 @@ from engiflow_api.domain.bom import (
     BomLine,
     compare,
     defined_codes,
+    duplicate_subtree,
     explode,
     find_cycles,
     kit_requirements,
@@ -487,6 +488,17 @@ def _apply_edit(
         return [
             _with(line, parent=parent) if line.line_no == target else line for line in lines
         ], next_no
+    if op == "duplicate_subtree":
+        code = _clean_code(edit.get("code"))
+        new_code = _clean_code(edit.get("new_code"))
+        suffix = str(edit.get("suffix") or "-CP")
+        if not code or not new_code:
+            raise DomainError("Informe o conjunto e o novo código.")
+        try:
+            subtree_lines, _ = duplicate_subtree(lines, code, new_code, suffix, next_no)
+        except BomError as exc:
+            raise DomainError(str(exc)) from exc
+        return [*lines, *subtree_lines], next_no + len(subtree_lines)
     if op == "duplicate_subassembly":
         code = _clean_code(edit.get("code"))
         new_code = _clean_code(edit.get("new_code"))

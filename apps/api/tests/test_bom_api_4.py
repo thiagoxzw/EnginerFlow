@@ -299,3 +299,33 @@ def test_modo_por_nivel_infere_pai_e_marca_como_inferido(
     ).json()
     assert body["inferred_parents"] == 2
     assert body["roots"] == ["ONIBUS-SYN-LV"]
+
+
+def test_duplicacao_completa_pela_api_cria_nova_revisao_com_descendentes(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    created = _structure(logged_client)
+    base_id = created["revision_id"]
+    edited = logged_client.post(
+        f"/api/v1/bom/revisions/{base_id}/edits",
+        json={
+            "edits": [
+                {"op": "duplicate_subtree", "code": "CONJ-SYN-TRAC", "new_code": "CONJ-SYN-TRAC-B"}
+            ]
+        },
+    )
+    assert edited.status_code == 201, edited.text
+    new_id = edited.json()["revision"]["id"]
+    body = logged_client.post(
+        f"/api/v1/bom/revisions/{new_id}/explode", json={"root": "ONIBUS-SYN-EV", "vehicles": "1"}
+    ).json()
+    motors = {c["code"]: Decimal(c["qty"]) for c in body["consolidated"]}
+    # Tração original (2×4=8) + cópia da tração (2×4=8) + bateria (1×1=1).
+    assert motors["COMP-SYN-MOT"] == Decimal(17)
+    # A revisão anterior não muda.
+    base = logged_client.post(
+        f"/api/v1/bom/revisions/{base_id}/explode", json={"root": "ONIBUS-SYN-EV", "vehicles": "1"}
+    ).json()
+    assert {c["code"]: Decimal(c["qty"]) for c in base["consolidated"]}["COMP-SYN-MOT"] == Decimal(
+        9
+    )

@@ -226,3 +226,48 @@ def test_nivel_sem_pai_no_modo_por_nivel() -> None:
     lines = [L(1, None, "TOPO-SYN", level=1), L(2, None, "SOLTO-SYN", level=2)]
     rules = {i.rule for i in validate(lines, mode="level")}
     assert "nivel_sem_pai" in rules
+
+
+def test_duplicacao_completa_copia_descendentes_com_codigos_internos_proprios() -> None:
+    from engiflow_api.domain.bom import duplicate_subtree
+
+    lines = [
+        L(1, None, "TOPO-SYN"),
+        L(2, "TOPO-SYN", "SUB-SYN", "2"),
+        L(3, "SUB-SYN", "MOT-SYN", "4"),
+        L(4, "SUB-SYN", "SUBSUB-SYN", "3"),
+        L(5, "SUBSUB-SYN", "PARAF-SYN", "5"),
+    ]
+    added, mapping = duplicate_subtree(lines, "SUB-SYN", "SUB2-SYN", "-CP", next_no=6)
+    assert mapping == {"SUB-SYN": "SUB2-SYN", "SUBSUB-SYN": "SUBSUB-SYN-CP"}
+    edges = {(a.parent, a.child, a.qty_raw) for a in added}
+    assert edges == {
+        ("TOPO-SYN", "SUB2-SYN", "2"),  # conjunto no mesmo pai, mesma quantidade
+        ("SUB2-SYN", "MOT-SYN", "4"),  # folha mantém o código
+        ("SUB2-SYN", "SUBSUB-SYN-CP", "3"),  # subconjunto interno com código próprio
+        ("SUBSUB-SYN-CP", "PARAF-SYN", "5"),
+    }
+    combined = [*lines, *added]
+    assert find_cycles(combined) == []
+    result = explode(combined, "TOPO-SYN", Decimal(1))
+    # Parafuso: original (2×3×5=30) + cópia (2×3×5=30) = 60.
+    assert result.consolidated[("PARAF-SYN", "UN")] == Decimal(60)
+    assert result.consolidated[("MOT-SYN", "UN")] == Decimal(16)
+
+
+def test_duplicacao_completa_recusa_codigo_existente_e_sufixo_que_colide() -> None:
+    import pytest as _pytest
+
+    from engiflow_api.domain.bom import BomError, duplicate_subtree
+
+    lines = [
+        L(1, None, "TOPO-SYN"),
+        L(2, "TOPO-SYN", "SUB-SYN", "2"),
+        L(3, "SUB-SYN", "SUBSUB-SYN", "3"),
+        L(4, "SUBSUB-SYN", "FOLHA-SYN", "1"),
+    ]
+    with _pytest.raises(BomError, match="já existe"):
+        duplicate_subtree(lines, "SUB-SYN", "TOPO-SYN", "-CP", next_no=4)
+    lines_clash = [*lines, L(5, "TOPO-SYN", "SUBSUB-SYN-CP", "1")]
+    with _pytest.raises(BomError, match="já existem"):
+        duplicate_subtree(lines_clash, "SUB-SYN", "SUB2-SYN", "-CP", next_no=5)
