@@ -183,3 +183,15 @@ Uma única etapa, em commits separados no mesmo branch, para revisão independen
 - Migrações: nenhuma migração nova nesta fase.
 - Benchmarks de cruzamento: não repetidos, por não terem sido afetados pelas alterações.
 - E2E isolado e CI do commit final: ver a seção de entrega no relatório da sessão.
+
+### Validação final da Fase 3 (commit `0ad648e`)
+
+- API: 330 testes aprovados; ruff, format e mypy limpos.
+- Web: typecheck, ESLint limpo e 106 testes de unidade aprovados.
+- E2E isolado completo: 28 aprovados e 1 pulado (captura visual, só com `VISUAL_OUT`). Inclui os 9 testes novos da Fase 3 (seleção, estrutura, colunas, edição em massa, copiar e colar com TSV difícil, preferências após atualizar, seleção descartada após renumeração e fórmulas novas).
+- CI do GitHub: run #68 concluída com sucesso no branch (correspondência com `0ad648e` pela ordem dos pushes).
+- Correções durante a validação:
+  - Seletores de teste apontavam para a tabela de prévia do upload; escopados à região Dados.
+  - Import deduplica por conteúdo; cada teste usa tabela com conteúdo único.
+  - Login: espera a hidratação do React antes de preencher.
+  - API: o login agora confirma a sessão antes de responder (defeito real, intermitente: a verificação seguinte podia receber 401).

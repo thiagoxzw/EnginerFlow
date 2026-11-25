@@ -40,3 +40,9 @@ Ver a seção 7 de `FASE_2B3_STATUS.md`.
 2. `apps\api\.venv\Scripts\python.exe -m pytest -q -p no:logging` e `pnpm test -- --run` em `apps\web`.
 3. E2E isolado: `scripts\e2e\Run-E2E.ps1`.
 4. Backup antes de qualquer migração no demonstrativo: `scripts\local\Backup-EngiFlow.ps1`.
+
+## Estado final da Fase 3 (2026-11-25)
+- Último commit: `0ad648e`. Branch `feat/fase-2b-3-data-crossing`, PR #4 em draft, sem merge.
+- Validação: API 330, web 106, E2E 28 aprovados (1 pulado por design). CI run #68 verde.
+- Demonstrativo reconstruído (API e web); volumes e dados preservados.
+- Pendências abertas: compressão e retenção de snapshots; modelo híbrido snapshot+incremental (possibilidade futura, sem migração destrutiva); virtualização (futura, paginação atende). Fase 4 e BOM Manager não iniciados.
