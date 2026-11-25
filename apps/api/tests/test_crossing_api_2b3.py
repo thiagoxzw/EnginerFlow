@@ -1,4 +1,4 @@
-﻿"""2B.3 bloco 1: Super-PROCV pela API (prévia). Dados sintéticos; nada é gravado."""
+"""2B.3 bloco 1: Super-PROCV pela API (prévia). Dados sintéticos; nada é gravado."""
 
 from __future__ import annotations
 
@@ -130,4 +130,3 @@ def test_sample_is_limited(logged_client: TestClient, storage_settings: Settings
     )
     assert resp.status_code == 200
     assert len(resp.json()["sample"]) == 2
-

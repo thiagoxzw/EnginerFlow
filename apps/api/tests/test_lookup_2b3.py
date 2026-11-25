@@ -20,7 +20,13 @@ RIGHT = _rows(
 )
 
 
-def _run(left, policy=None, key_l=(0,), key_r=(0,), ret=(1, 2)):
+def _run(
+    left: list[tuple[int, list[str | None]]],
+    policy: lk.LookupPolicy | None = None,
+    key_l: tuple[int, ...] = (0,),
+    key_r: tuple[int, ...] = (0,),
+    ret: tuple[int, ...] = (1, 2),
+) -> lk.LookupResult:
     policy = policy or lk.LookupPolicy()
     index = lk.build_index(RIGHT, key_r, ret)
     return lk.lookup(left, index, key_l, len(ret), policy)
