@@ -1,4 +1,4 @@
-# EngiFlow — Roadmap
+﻿# EngiFlow — Roadmap
 
 Legenda de status: **Implementado · Testado · Simulado · Pendente de homologação · Bloqueado por dependência externa · Planejado**.
 
@@ -45,7 +45,9 @@ Datas: **não definidas**. Dependem de decisões em `decisions/OPEN_QUESTIONS.md
 | 1 — Foundation | Concluída, com PostgreSQL 17 validado pelo CI | `docs/operations/FASE_1_STATUS.md` |
 | 2A — Data Studio | **Concluída** (merge do PR #1 por squash, CI da `main` verde) | `docs/operations/FASE_2_STATUS.md` |
 | 2B.1 — Fundação das transformações | Em homologação no PR #2 (CI verde em PostgreSQL 17, 116 testes); integridade revisada (9 testes novos) | `docs/operations/FASE_2B1_STATUS.md` |
-| 2B.2 — Manipulação de dados e interface funcional | **Em desenvolvimento** no Draft PR #3: blocos 1 a 8 implementados com testes; medições 100k/500k e revisão final pendentes (ver status) | `docs/operations/FASE_2B2_STATUS.md` |
-| 2B.3 — Cruzamento de informações | Planejada em `docs/roadmap/FASE_2B_PLANO.md` | — |
+| 2B.2 — Manipulação de dados e interface funcional | **Concluída** (PR #3 mesclado em main, commit 90cb12e); limitações de desempenho registradas para a 2B.4 | docs/operations/FASE_2B2_STATUS.md |
+| 2B.3 — Cruzamento e comparação de tabelas | **Em implementação** no branch `feat/fase-2b-3-data-crossing` (Super-PROCV, junções, comparação, agrupamento) | `docs/roadmap/FASE_2B3_PLANO.md` |
 | 2B.4 — Refinamentos (virtualização, cálculos, medições) | Planejada em `docs/roadmap/FASE_2B_PLANO.md` | — |
 | 3 — BOM Manager | Não iniciada (não autorizada) | — |
+
+

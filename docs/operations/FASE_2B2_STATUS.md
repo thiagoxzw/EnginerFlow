@@ -1,6 +1,7 @@
 ﻿# Fase 2B.2 — Status de homologação
 
-Branch: `feat/fase-2b-2-data-manipulation` · PR #3 (Draft até a conclusão desta revisão).
+**Status: concluída.** Mesclada em main por squash (PR #3, commit 90cb12e), após homologação aprovada.
+Branch de origem: `feat/fase-2b-2-data-manipulation`.
 Dados: exclusivamente sintéticos. Uso individual, sem RBAC nem multi-tenancy.
 Não há merge: a decisão de mesclar é do responsável pelo projeto.
 
@@ -129,4 +130,5 @@ Achados não corrigidos nesta fase (melhorias para a 2B.4, sem defeito funcional
 ## Situação final
 
 PR #3 marcado como pronto para revisão (não mesclado). A decisão de merge fica com o responsável pelo projeto.
+
 
