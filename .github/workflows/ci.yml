@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -143,3 +144,38 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/api.log" || true
           cat "$RUNNER_TEMP/web.log" || true
+
+  benchmark:
+    name: Medição 2B.2 (PostgreSQL 17, dados sintéticos)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: engiflow_bench
+          POSTGRES_USER: engiflow
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U engiflow -d engiflow_bench"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      ENGIFLOW_BENCH_DATABASE_URL: postgresql+psycopg://engiflow:ci-only-password@127.0.0.1:5432/engiflow_bench
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Instalar dependências (lock)
+        working-directory: apps/api
+        run: uv sync --locked
+      - name: Medir 100 mil linhas
+        working-directory: apps/api
+        run: uv run python scripts/bench_2b2_postgres.py --rows 100000
+      - name: Medir 500 mil linhas
+        working-directory: apps/api
+        run: uv run python scripts/bench_2b2_postgres.py --rows 500000

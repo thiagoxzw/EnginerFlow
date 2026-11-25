@@ -1,11 +1,12 @@
-import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
 // Dados sintéticos apenas. Credenciais de teste vêm do ambiente do CI, nunca do repositório.
 const EMAIL = process.env.E2E_EMAIL ?? "";
 const PASSWORD = process.env.E2E_PASSWORD ?? "";
-const FIXTURE = path.join(__dirname, "fixtures", "SYN-e2e.csv");
+// Módulo ES: `__dirname` não existe; o caminho é resolvido a partir de import.meta.url.
+const FIXTURE = fileURLToPath(new URL("./fixtures/SYN-e2e.csv", import.meta.url));
 
 test.beforeAll(() => {
   if (!EMAIL || !PASSWORD) {
