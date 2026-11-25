@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { CompareTab, CrossSection, ExplodeTab, HistoryTab, KitsTab, ValidateTab } from "@/components/bom/bom-analysis";
 import { ImportAssistant } from "@/components/bom/bom-import";
@@ -11,6 +12,7 @@ import { getBomLines, listBomStructures, setBomCurrent, type BomStructure } from
 import { topLines } from "@/lib/bom-tree";
 import { usePersistedString } from "@/lib/persist";
 import { errorText } from "@/components/data-studio/templates-section";
+import { ApiError } from "@/lib/api";
 
 const TABS = [
   { id: "visao", label: "Visão geral" },
@@ -28,7 +30,14 @@ export const BOM_STRUCTURE_KEY = "engiflow:bom-estrutura";
 
 export function BomView() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const structures = useQuery({ queryKey: ["bom-structures"], queryFn: listBomStructures });
+  // Sessão expirada: volta ao login, em vez de mostrar a lista vazia como se não houvesse estruturas.
+  useEffect(() => {
+    if (structures.error instanceof ApiError && structures.error.status === 401) {
+      router.replace("/login");
+    }
+  }, [structures.error, router]);
   const [storedId, setStoredId] = usePersistedString(BOM_STRUCTURE_KEY);
   const [workingRevision, setWorkingRevision] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("visao");
