@@ -54,6 +54,8 @@ test("importa, filtra, substitui em lote com prévia e desfaz pelo histórico", 
   // Histórico: desfazer restaura o valor original
   await page.getByRole("button", { name: "Desfazer (Ctrl+Z)" }).click();
   await expect(page.getByText("Operação desfeita.")).toBeVisible();
-  await expect(page.getByText("Parafuso", { exact: true })).toBeVisible();
-  await expect(page.getByText("Parafuso X")).toHaveCount(0);
+  // Escopo na tabela: a prévia do cabeçalho (em "Mapeamento…", fechado) também contém os valores.
+  const dados = page.getByRole("region", { name: "Dados" });
+  await expect(dados.getByText("Parafuso", { exact: true })).toBeVisible();
+  await expect(dados.getByText("Parafuso X")).toHaveCount(0);
 });

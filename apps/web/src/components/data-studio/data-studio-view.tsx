@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { DataTable } from "@/components/data-studio/data-table";
@@ -13,6 +13,7 @@ import {
   TableAdminSection,
 } from "@/components/data-studio/table-admin";
 import { CrossLookupSection } from "@/components/data-studio/cross-lookup-section";
+import { UploadSection } from "@/components/data-studio/upload-section";
 import { ReplaceSection } from "@/components/data-studio/replace-section";
 import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
@@ -29,7 +30,6 @@ import {
   isDerived,
   listDatasets,
   saveMapping,
-  uploadDataset,
   type ExportFormat,
   type CanonicalField,
   type CompareOut,
@@ -148,79 +148,6 @@ export function DataStudioView() {
         </main>
       </div>
     </div>
-  );
-}
-
-function UploadSection({ onImported }: { onImported: (id: string) => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [sheet, setSheet] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const upload = useMutation({
-    mutationFn: () => {
-      if (!file) {
-        throw new Error("Escolha um arquivo.");
-      }
-      return uploadDataset(file, sheet);
-    },
-    onSuccess: (result) => {
-      setNotice(
-        result.created
-          ? `Tabela "${result.dataset.name}" importada.`
-          : `Este arquivo já estava importado: "${result.dataset.name}".`,
-      );
-      onImported(result.dataset.id);
-    },
-    onError: (error) => setNotice(errorMessage(error)),
-  });
-
-  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setNotice(null);
-    upload.mutate();
-  };
-
-  return (
-    <section className={sectionClass} aria-labelledby="importar">
-      <h2 id="importar" className="font-medium">
-        Importar arquivo
-      </h2>
-      <form onSubmit={onSubmit} className="flex flex-col gap-3">
-        <div className="flex-1 space-y-1">
-          <label htmlFor="arquivo" className="block text-sm font-medium">
-            Arquivo (.csv ou .xlsx)
-          </label>
-          <input
-            id="arquivo"
-            type="file"
-            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="w-full text-sm"
-          />
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="aba" className="block text-sm font-medium">
-            Aba (opcional)
-          </label>
-          <input
-            id="aba"
-            type="text"
-            value={sheet}
-            onChange={(e) => setSheet(e.target.value)}
-            className={inputClass}
-            placeholder="primeira aba"
-          />
-        </div>
-        <button type="submit" disabled={upload.isPending || !file} className={buttonClass}>
-          {upload.isPending ? "Importando…" : "Importar"}
-        </button>
-      </form>
-      {notice ? (
-        <p role="status" className="text-sm text-[var(--color-muted)]">
-          {notice}
-        </p>
-      ) : null}
-    </section>
   );
 }
 

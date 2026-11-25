@@ -81,16 +81,28 @@ test("seleção manual de cabeçalho reconstrói a tabela a partir do original",
 test("exclusão e desfazer de linhas selecionadas", async ({ page }) => {
   await importAndOpen(page, "SYN-del.csv", "SYN-del");
   // Linha 2 do arquivo é SYN-020 (o cabeçalho ocupa a linha 1).
-  await page.getByRole("checkbox", { name: "Selecionar linha 2" }).check();
-  const acoes = page.getByRole("region", { name: "Ações nas linhas selecionadas" });
-  await acoes.getByRole("button", { name: "Excluir linhas" }).click();
-  await acoes.getByRole("button", { name: "Confirmar" }).click();
-  await expect(acoes.getByRole("status")).toContainText("Linhas excluídas logicamente");
-  await expect(page.getByText("SYN-020", { exact: true })).toHaveCount(0);
+  const desfazer = page.getByRole("button", { name: "Desfazer (Ctrl+Z)" });
+  let undone = false;
+  try {
+    await page.getByRole("checkbox", { name: "Selecionar linha 2" }).check();
+    const acoes = page.getByRole("region", { name: "Ações nas linhas selecionadas" });
+    await acoes.getByRole("button", { name: "Excluir linhas" }).click();
+    await acoes.getByRole("button", { name: "Confirmar" }).click();
+    await expect(acoes.getByRole("status")).toContainText("Linhas excluídas logicamente");
+    // Escopo na tabela: a prévia do cabeçalho (em "Mapeamento…", fechado) também tem valores exatos.
+    const dados = page.getByRole("region", { name: "Dados" });
+    await expect(dados.getByText("SYN-020", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Desfazer (Ctrl+Z)" }).click();
-  await expect(page.getByText("Operação desfeita.")).toBeVisible();
-  await expect(page.getByText("SYN-020", { exact: true })).toBeVisible();
+    await desfazer.click();
+    undone = true;
+    await expect(page.getByText("Operação desfeita.")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Dados" }).getByText("SYN-020", { exact: true })).toBeVisible();
+  } finally {
+    // Se uma asserção falhar depois da exclusão, desfaz para não deixar a tabela sintética alterada.
+    if (!undone && (await desfazer.isEnabled().catch(() => false))) {
+      await desfazer.click();
+    }
+  }
 });
 
 test("excluir e restaurar tabela com confirmação do nome exato", async ({ page }) => {

@@ -87,6 +87,28 @@ export function getDataset(id: string): Promise<DatasetDetail> {
   return apiFetch<DatasetDetail>(`/api/v1/datasets/${id}`);
 }
 
+export interface InspectRow {
+  row_number: number;
+  values: (string | null)[];
+}
+
+/** Resultado da leitura prévia (sem gravar). Ver POST /api/v1/datasets/inspect. */
+export interface InspectOut {
+  kind: string;
+  sheets: string[];
+  sheet: string | null;
+  header_row: number | null;
+  columns: string[];
+  preview: InspectRow[];
+  warnings: string[];
+}
+
+export function inspectUpload(file: File): Promise<InspectOut> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch<InspectOut>("/api/v1/datasets/inspect", { method: "POST", body });
+}
+
 export function uploadDataset(file: File, sheet: string): Promise<ImportOut> {
   const body = new FormData();
   body.append("file", file);

@@ -102,9 +102,11 @@ export function HeaderSection({ datasetId }: { datasetId: string }) {
                   }`}
                 >
                   <td className="px-2 py-1 text-[var(--color-muted)]">{row.row_number}</td>
-                  <td className="px-2 py-1 font-mono">
-                    {row.values.map((v) => v ?? "").join("  |  ")}
-                  </td>
+                  {row.values.map((v, j) => (
+                    <td key={j} className="whitespace-nowrap px-2 py-1 font-mono">
+                      {v ?? ""}
+                    </td>
+                  ))}
                   <td className="px-2 py-1 text-right">
                     <button
                       type="button"
