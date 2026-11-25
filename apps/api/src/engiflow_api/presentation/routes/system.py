@@ -102,6 +102,10 @@ def login_route(payload: LoginIn, request: Request, response: Response, db: DbDe
         result="ok",
         correlation_id=_correlation(request),
     )
+    # Commit explícito antes da resposta: a sessão precisa existir para a próxima requisição do
+    # navegador. Sem isso, o commit da dependência pode ocorrer depois, e a verificação seguinte
+    # (/api/v1/dashboard) recebia 401 e devolvia o usuário ao login.
+    db.commit()
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
