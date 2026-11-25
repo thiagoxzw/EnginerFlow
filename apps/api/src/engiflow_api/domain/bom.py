@@ -11,6 +11,7 @@ Regras de cálculo:
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
@@ -397,6 +398,18 @@ def validate(lines: list[BomLine], mode: str = MODE_EXPLICIT) -> list[Issue]:
                     line.child,
                 )
             )
+    for line in lines:
+        if is_provisional(line.child):
+            issues.append(
+                Issue(
+                    "informação",
+                    "codigo_provisorio",
+                    f"Código provisório '{line.child}' gerado por duplicação. "
+                    "Não é código oficial: confirme antes de usar.",
+                    line.line_no,
+                    line.child,
+                )
+            )
     return issues
 
 
@@ -638,18 +651,41 @@ def consolidated_list(lines: list[BomLine]) -> list[dict[str, object]]:
     ]
 
 
+PROVISIONAL_SUFFIX = "-CP"
+
+
+def is_provisional(code: str | None) -> bool:
+    """Código provisório gerado pela duplicação: não é código oficial do ERP/cadastro.
+
+    Identificado pelo sufixo `-CP` (ou `-CP2`, `-CP3`… quando há colisão). Nunca é atribuído a um
+    código industrial real: o usuário deve confirmar a criação antes de usá-lo em outros sistemas.
+    """
+    if not code:
+        return False
+    return bool(re.search(r"-CP\d*$", code))
+
+
+def _unique_provisional(base: str, taken: set[str]) -> str:
+    candidate = f"{base}{PROVISIONAL_SUFFIX}"
+    counter = 2
+    while candidate in taken:
+        candidate = f"{base}{PROVISIONAL_SUFFIX}{counter}"
+        counter += 1
+    return candidate
+
+
 def duplicate_subtree(
     lines: list[BomLine],
     code: str,
     new_code: str,
-    suffix: str,
     next_no: int,
 ) -> tuple[list[BomLine], dict[str, str]]:
     """Duplicação COMPLETA de um subconjunto, com todos os descendentes.
 
-    - O conjunto recebe `new_code` e fica nos mesmos pais do original.
-    - Cada subconjunto interno (com filhos) recebe código novo: código + `suffix`, para que a cópia
-      tenha relacionamentos internos próprios e nenhum código seja compartilhado indevidamente.
+    - O conjunto recebe `new_code` (código informado pelo usuário) e fica nos mesmos pais.
+    - Cada subconjunto interno recebe um código PROVISÓRIO único: código + `-CP`.
+      Se já houver colisão (duplicação sucessiva), usa `-CP2`, `-CP3`. Nenhum código existente
+      é reaproveitado.
     - Componentes folha mantêm o código: são o mesmo material.
     - Quantidades, unidades e propriedades são copiadas sem alteração.
     Retorna as linhas novas e o mapa código original -> código da cópia.
@@ -659,10 +695,7 @@ def duplicate_subtree(
         raise BomError(f"Conjunto '{code}' não existe nesta estrutura.")
     if new_code in defined:
         raise BomError(f"O código '{new_code}' já existe nesta estrutura.")
-    if not suffix:
-        raise BomError("O sufixo dos subconjuntos internos não pode ser vazio.")
     index = _children_index(lines)
-    # Descendentes (fechamento transitivo) a partir do conjunto.
     closure: set[str] = set()
     todo = [code]
     while todo:
@@ -674,12 +707,11 @@ def duplicate_subtree(
                 todo.append(child)
     subassemblies = {c for c in closure | {code} if index.get(c)}
     mapping: dict[str, str] = {code: new_code}
+    taken = set(defined) | {new_code}
     for sub in sorted(subassemblies - {code}):
-        mapping[sub] = f"{sub}{suffix}"
-    clashes = sorted(c for c in mapping.values() if c in defined)
-    if clashes:
-        listed = ", ".join(clashes[:10])
-        raise BomError(f"Códigos da cópia já existem: {listed}. Escolha outro sufixo.")
+        provisional = _unique_provisional(sub, taken)
+        mapping[sub] = provisional
+        taken.add(provisional)
 
     added: list[BomLine] = []
     n = next_no
@@ -718,7 +750,7 @@ def kit_requirements_for_parts(
     vehicles: Decimal,
     lot: Decimal,
 ) -> dict[tuple[str, str], Decimal]:
-    """Materiais do kit para vehicles × lot kits.
+    """Materiais do kit para vehicles x lot kits.
 
     - Peça com filhos: entram os componentes dela (o próprio conjunto não é material).
     - Componente folha: entra pela quantidade e unidade informadas (ou a unidade da linha).

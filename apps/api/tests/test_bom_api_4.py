@@ -421,3 +421,33 @@ def test_kit_com_codigo_fora_da_estrutura_e_recusado(
         },
     )
     assert resp.status_code in (400, 422), resp.text
+
+
+def test_kit_com_mesmo_codigo_em_unidades_diferentes_nao_e_somado(
+    logged_client: TestClient, storage_settings: Settings
+) -> None:
+    created = _structure(logged_client)
+    sid = created["structure"]["id"]
+    rid = created["revision_id"]
+    csv_data = ("Código;Quantidade;Unidade\nPARAF-SYN-M8;2;UN\nPARAF-SYN-M8;3;KG\n").encode()
+    ds = _import(logged_client, _unique("SYN-kit-unid"), csv_data)
+    mapping = {"code": "Código", "qty": "Quantidade", "unit": "Unidade"}
+    preview = logged_client.post(
+        f"/api/v1/bom/structures/{sid}/kits/import/preview",
+        json={"dataset_id": ds["id"], "mapping": mapping},
+    ).json()
+    unidades = {p["unit"] for p in preview["parts"] if p["code"] == "PARAF-SYN-M8"}
+    assert unidades == {"UN", "KG"}  # duas peças, nenhuma soma entre unidades
+    assert any("unidades diferentes" in i["message"] for i in preview["issues"])
+    kit = logged_client.post(
+        f"/api/v1/bom/structures/{sid}/kits/import",
+        json={"name": "Kit unidades", "dataset_id": ds["id"], "mapping": mapping},
+    )
+    assert kit.status_code == 201, kit.text
+    calc = logged_client.post(
+        f"/api/v1/bom/revisions/{rid}/kit-calc",
+        json={"parts": kit.json()["parts"], "vehicles": "1", "lot": "1"},
+    ).json()
+    materiais = {(m["code"], m["unit"]): Decimal(m["qty"]) for m in calc["materials"]}
+    assert materiais[("PARAF-SYN-M8", "UN")] == Decimal(2)
+    assert materiais[("PARAF-SYN-M8", "KG")] == Decimal(3)

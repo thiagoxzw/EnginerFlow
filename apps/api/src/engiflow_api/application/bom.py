@@ -493,11 +493,10 @@ def _apply_edit(
     if op == "duplicate_subtree":
         code = _clean_code(edit.get("code"))
         new_code = _clean_code(edit.get("new_code"))
-        suffix = str(edit.get("suffix") or "-CP")
         if not code or not new_code:
             raise DomainError("Informe o conjunto e o novo código.")
         try:
-            subtree_lines, _ = duplicate_subtree(lines, code, new_code, suffix, next_no)
+            subtree_lines, _ = duplicate_subtree(lines, code, new_code, next_no)
         except BomError as exc:
             raise DomainError(str(exc)) from exc
         return [*lines, *subtree_lines], next_no + len(subtree_lines)
@@ -785,6 +784,19 @@ def kit_rows_from_dataset(
                 "unit": unit,
                 "description": _clean_text(_cell(values, index.get("description"))),
             }
+    units_by_code: dict[str, set[str]] = defaultdict(set)
+    for code_key_value, unit_value in merged:
+        units_by_code[code_key_value].add(unit_value)
+    for code_value, units in sorted(units_by_code.items()):
+        if len(units) > 1:
+            issues.append(
+                {
+                    "severity": "informação",
+                    "row": 0,
+                    "code": code_value,
+                    "message": _units_message(code_value, units),
+                }
+            )
     parts = [
         {
             "code": p["code"],
@@ -813,3 +825,11 @@ def add_kit_from_dataset(
     if not preview_data["parts"]:
         raise DomainError("A tabela não tem componentes válidos para o kit.")
     return add_kit(db, structure, name, preview_data["parts"])
+
+
+def _units_message(code: str, units: set[str]) -> str:
+    listed = ", ".join(sorted(u or "(sem unidade)" for u in units))
+    return (
+        f"Mesmo código '{code}' com unidades diferentes ({listed}): "
+        "tratados em linhas separadas, não somados."
+    )

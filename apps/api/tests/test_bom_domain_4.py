@@ -238,7 +238,7 @@ def test_duplicacao_completa_copia_descendentes_com_codigos_internos_proprios() 
         L(4, "SUB-SYN", "SUBSUB-SYN", "3"),
         L(5, "SUBSUB-SYN", "PARAF-SYN", "5"),
     ]
-    added, mapping = duplicate_subtree(lines, "SUB-SYN", "SUB2-SYN", "-CP", next_no=6)
+    added, mapping = duplicate_subtree(lines, "SUB-SYN", "SUB2-SYN", next_no=6)
     assert mapping == {"SUB-SYN": "SUB2-SYN", "SUBSUB-SYN": "SUBSUB-SYN-CP"}
     edges = {(a.parent, a.child, a.qty_raw) for a in added}
     assert edges == {
@@ -255,10 +255,8 @@ def test_duplicacao_completa_copia_descendentes_com_codigos_internos_proprios() 
     assert result.consolidated[("MOT-SYN", "UN")] == Decimal(16)
 
 
-def test_duplicacao_completa_recusa_codigo_existente_e_sufixo_que_colide() -> None:
-    import pytest as _pytest
-
-    from engiflow_api.domain.bom import BomError, duplicate_subtree
+def test_duplicacao_sucessiva_resolve_colisao_com_codigos_provisorios_unicos() -> None:
+    from engiflow_api.domain.bom import BomError, duplicate_subtree, is_provisional
 
     lines = [
         L(1, None, "TOPO-SYN"),
@@ -266,8 +264,18 @@ def test_duplicacao_completa_recusa_codigo_existente_e_sufixo_que_colide() -> No
         L(3, "SUB-SYN", "SUBSUB-SYN", "3"),
         L(4, "SUBSUB-SYN", "FOLHA-SYN", "1"),
     ]
-    with _pytest.raises(BomError, match="já existe"):
-        duplicate_subtree(lines, "SUB-SYN", "TOPO-SYN", "-CP", next_no=4)
-    lines_clash = [*lines, L(5, "TOPO-SYN", "SUBSUB-SYN-CP", "1")]
-    with _pytest.raises(BomError, match="já existem"):
-        duplicate_subtree(lines_clash, "SUB-SYN", "SUB2-SYN", "-CP", next_no=5)
+    first, map1 = duplicate_subtree(lines, "SUB-SYN", "SUB2-SYN", next_no=5)
+    assert map1["SUBSUB-SYN"] == "SUBSUB-SYN-CP"
+    after_first = [*lines, *first]
+    second, map2 = duplicate_subtree(after_first, "SUB-SYN", "SUB3-SYN", next_no=20)
+    # Segunda duplicação: o provisório já existe, então recebe o próximo sufixo.
+    assert map2["SUBSUB-SYN"] == "SUBSUB-SYN-CP2"
+    assert find_cycles([*after_first, *second]) == []
+    assert is_provisional("SUBSUB-SYN-CP2") and is_provisional("SUBSUB-SYN-CP")
+    assert not is_provisional("SUBSUB-SYN") and not is_provisional("ERP-CP-OFICIAL-X")
+    try:
+        duplicate_subtree(after_first, "SUB-SYN", "SUB2-SYN", next_no=30)
+    except BomError as exc:
+        assert "já existe" in str(exc)
+    else:
+        raise AssertionError("código informado existente deveria ser recusado")
