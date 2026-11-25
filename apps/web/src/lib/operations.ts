@@ -56,6 +56,49 @@ export function applyOperation(
   });
 }
 
+export interface OperationRecord {
+  id: string;
+  seq: number;
+  code: string;
+  code_version: number;
+  status: "applied" | "undone";
+  rows_affected: number;
+  cells_changed: number;
+  created_at: string;
+}
+
+export interface VersionRecord {
+  id: string;
+  number: number;
+  row_count: number;
+  content_sha256: string;
+  created_at: string;
+  is_current: boolean;
+}
+
+/** Desfaz/refaz: a API move os DOIS ponteiros e recusa se o estado mudou (409). */
+export function moveHistory(
+  datasetId: string,
+  direction: "undo" | "redo",
+  state: DatasetState,
+): Promise<{ current_version_id: string; current_metadata_version_id: string }> {
+  return apiFetch(`/api/v1/datasets/${datasetId}/${direction}`, {
+    method: "POST",
+    body: JSON.stringify({
+      base_version_id: state.dataVersionId,
+      base_metadata_version_id: state.metadataVersionId,
+    }),
+  });
+}
+
+export function listOperations(datasetId: string): Promise<OperationRecord[]> {
+  return apiFetch<OperationRecord[]>(`/api/v1/datasets/${datasetId}/operations`);
+}
+
+export function listVersions(datasetId: string): Promise<VersionRecord[]> {
+  return apiFetch<VersionRecord[]>(`/api/v1/datasets/${datasetId}/versions`);
+}
+
 export function rawHead(datasetId: string, count = 30): Promise<RawRow[]> {
   return apiFetch<RawRow[]>(`/api/v1/datasets/${datasetId}/raw-head?count=${count}`);
 }

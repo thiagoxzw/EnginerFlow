@@ -7,6 +7,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api";
 import { DataTable } from "@/components/data-studio/data-table";
 import { HeaderSection } from "@/components/data-studio/header-section";
+import { HistoryPanel } from "@/components/data-studio/history-panel";
 import {
   DeletedTablesSection,
   TableAdminSection,
@@ -231,6 +232,8 @@ function DatasetPanel({ datasetId, onDeleted }: { datasetId: string; onDeleted: 
         initial={data.mapping}
         onSaved={onSaved}
       />
+
+      <HistoryPanel datasetId={datasetId} />
 
       <TableAdminSection datasetId={datasetId} name={data.name} onDeleted={onDeleted} />
 
