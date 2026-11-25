@@ -6,7 +6,11 @@ const EMAIL = process.env.E2E_EMAIL ?? "";
 const PASSWORD = process.env.E2E_PASSWORD ?? "";
 
 // Linhas (número exibido): 2 Parafuso/007, 3 Porca/0, 4 Arruela/(vazio), 5 Bucha/4.
-const CSV = "SYN-Código;SYN-Descrição;Qtd\n001;Parafuso;007\n002;Porca;0\n003;Arruela;\n004;Bucha;4\n";
+// O import deduplica por hash do conteúdo: o código recebe um sufixo único por teste, para que
+// cada tabela seja de fato nova. Os valores de descrição e quantidade ficam idênticos.
+function csvFor(uid: string): string {
+  return `SYN-Código;SYN-Descrição;Qtd\n001-${uid};Parafuso;007\n002-${uid};Porca;0\n003-${uid};Arruela;\n004-${uid};Bucha;4\n`;
+}
 
 async function login(page: Page) {
   await page.goto("/login");
@@ -19,12 +23,13 @@ async function login(page: Page) {
 
 /** Importa uma tabela nova (nome único) e a abre. Retorna o nome. */
 async function openFreshTable(page: Page): Promise<string> {
-  const name = `SYN-f3-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const uid = `${Date.now()}${Math.floor(Math.random() * 1_000_000)}`;
+  const name = `SYN-f3-${uid}`;
   await page.goto("/data-studio");
   await page.getByLabel("Arquivo (.csv ou .xlsx)").setInputFiles({
     name: `${name}.csv`,
     mimeType: "text/csv",
-    buffer: Buffer.from(CSV, "utf8"),
+    buffer: Buffer.from(csvFor(uid), "utf8"),
   });
   await page.getByRole("button", { name: "Importar" }).click();
   await page
