@@ -71,7 +71,8 @@ def make_unique_right(path: Path, rows: int) -> None:
     """Cenário dentro do limite: chaves únicas, 60% de sobreposição com a consulta.
 
     Consulta 1..N e busca [0,4N/10 + 1 .. 0,4N/10 + N]: casam 0,6N, removem 0,4N e adicionam 0,4N.
-    Com N=500 mil: 300 mil casadas, 200 mil removidas e 200 mil adicionadas (400 mil diferenças < 500 mil).
+    Com N=500 mil: 300 mil casadas, 200 mil removidas e 200 mil adicionadas
+    (400 mil diferenças, abaixo de 500 mil).
     """
     start = rows * 2 // 5 + 1
     with path.open("w", encoding="utf-8", newline="\n") as fh:
@@ -175,7 +176,10 @@ def main() -> int:
         print("Recusado: o benchmark exige o banco 'engiflow_bench' em 127.0.0.1.", file=sys.stderr)
         return 2
     if parsed.port in (None, 5432):
-        print("Recusado: porta 5432 é do ambiente demonstrativo. Use o PostgreSQL de benchmark.", file=sys.stderr)
+        print(
+            "Recusado: porta 5432 é do ambiente demonstrativo. Use o PostgreSQL de benchmark.",
+            file=sys.stderr,
+        )
         return 2
 
     engine = create_engine(url)
@@ -315,7 +319,7 @@ def main() -> int:
                 f"pico_python_MB={row['pico_MB']} | pico_processo_MB={row['pico_processo_MB']} | "
                 f"saida={row['saida']}"
             )
-            # Registro imediato: no stdout e num arquivo próprio, gravado e fechado a cada resultado.
+            # Registro imediato: no stdout e em arquivo próprio, fechado a cada resultado.
             print(line, flush=True)
             if results_file:
                 with Path(results_file).open("a", encoding="utf-8") as out:
