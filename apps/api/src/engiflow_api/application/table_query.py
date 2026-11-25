@@ -15,9 +15,39 @@ from engiflow_api.domain.query import RowMatcher, TableQuery, sort_index, sort_k
 from engiflow_api.infrastructure.models import Dataset, DatasetVersionRow
 
 MAX_SORT_ROWS = 500_000
+MAX_SELECTED_ROWS = 10_000  # mesmo teto de DeleteRowsParams e SetRowsValueParams
 STREAM_BATCH = 2_000
 
 Page = list[tuple[int, list[str | None]]]
+
+
+def matching_row_numbers(
+    db: DbSession, dataset: Dataset, query: TableQuery, *, cap: int | None = None
+) -> list[int]:
+    """Números das linhas que casam com a consulta, para seleção explícita.
+
+    Acima do teto a seleção é recusada: o usuário precisa refinar os filtros. Isso evita
+    operações sobre listas grandes demais para auditar.
+    """
+    limit = MAX_SELECTED_ROWS if cap is None else cap
+    if dataset.current_version_id is None:
+        raise DomainError("Tabela sem versão atual.")
+    matcher = RowMatcher(list(dataset.columns), query)
+    stmt = (
+        select(DatasetVersionRow.row_number, DatasetVersionRow.values)
+        .where(DatasetVersionRow.version_id == dataset.current_version_id)
+        .order_by(DatasetVersionRow.row_number)
+        .execution_options(yield_per=STREAM_BATCH)
+    )
+    numbers: list[int] = []
+    for number, values in db.execute(stmt):
+        if matcher.matches(list(values)):
+            numbers.append(number)
+            if len(numbers) > limit:
+                raise DomainError(
+                    f"A seleção passa de {limit} linhas. Refine os filtros antes de selecionar."
+                )
+    return numbers
 
 
 def query_page(

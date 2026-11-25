@@ -268,6 +268,35 @@ def _set_header_row(snapshot: Snapshot, params: SetHeaderParams) -> OperationRes
     )
 
 
+class DeleteRowsParams(_Strict):
+    row_numbers: list[int] = Field(min_length=1, max_length=MAX_SELECTED_ROWS)
+
+
+def _delete_rows(snapshot: Snapshot, params: DeleteRowsParams) -> OperationResult:
+    """Exclusão lógica: a linha sai desta versão, mas continua nas versões anteriores.
+
+    Os números de linha das demais são preservados (não são renumerados).
+    """
+    selected = set(params.row_numbers)
+    present = {n for n in snapshot.row_numbers if n in selected}
+    missing = sorted(selected - present)
+    if missing:
+        raise DomainError(
+            f"Linhas inexistentes na versão atual: {', '.join(str(n) for n in missing[:10])}."
+        )
+    rows: list[list[str | None]] = []
+    numbers: list[int] = []
+    for number, row in zip(snapshot.row_numbers, snapshot.rows, strict=True):
+        if number not in selected:
+            rows.append(row)
+            numbers.append(number)
+    return OperationResult(
+        snapshot=_with(snapshot, rows=rows, row_numbers=numbers),
+        rows_affected=len(present),
+        cells_changed=0,
+    )
+
+
 def _set_mapping(snapshot: Snapshot, params: SetMappingParams) -> OperationResult:
     unknown_fields = sorted(set(params.mapping) - set(CANONICAL_FIELDS))
     if unknown_fields:
@@ -313,6 +342,16 @@ OPERATIONS: dict[str, OperationSpec] = {
         reversible=True,
         touches_data=False,
         apply=_set_mapping,
+    ),
+    "delete_rows": OperationSpec(
+        code="delete_rows",
+        version=1,
+        description="Exclui logicamente linhas selecionadas (podem ser desfeitas). "
+        "Os números das demais linhas são preservados.",
+        params_model=DeleteRowsParams,
+        reversible=True,
+        touches_data=True,
+        apply=_delete_rows,
     ),
     "set_header_row": OperationSpec(
         code="set_header_row",

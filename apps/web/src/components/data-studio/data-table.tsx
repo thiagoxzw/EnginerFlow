@@ -3,12 +3,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { RowActions } from "@/components/data-studio/row-actions";
 import { errorText } from "@/components/data-studio/templates-section";
 import {
   NUMERIC_OPS,
   OP_LABELS,
   VALUE_OPS,
   queryRows,
+  selectRows,
   type FilterClause,
   type FilterOp,
   type RowsQuery,
@@ -45,6 +47,10 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const [sort, setSort] = useState<{ column: string; dir: "asc" | "desc" } | null>(null);
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
+  // Seleção: manual (linhas marcadas), da página atual ou de todas as que casam com os filtros.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [scope, setScope] = useState<"manual" | "page" | "filter">("manual");
+  const [selectMessage, setSelectMessage] = useState<string | null>(null);
 
   const query: RowsQuery = {
     offset,
@@ -213,6 +219,18 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-[var(--color-surface)] text-left text-[var(--color-muted)]">
             <tr>
+              <th className="px-2 py-1 font-medium">
+                <input
+                  type="checkbox"
+                  aria-label="Selecionar todas as linhas desta página"
+                  checked={(rows.data?.rows.length ?? 0) > 0 && rows.data?.rows.every((r) => selected.has(r.row_number)) === true}
+                  onChange={(e) => {
+                    const page = rows.data?.rows.map((r) => r.row_number) ?? [];
+                    setSelected(e.target.checked ? new Set(page) : new Set());
+                    setScope("page");
+                  }}
+                />
+              </th>
               <th className="px-2 py-1 font-medium">Linha</th>
               {columns.map((c) => {
                 const active = sort?.column === c ? sort.dir : null;
@@ -234,6 +252,22 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
           <tbody>
             {(rows.data?.rows ?? []).map((row) => (
               <tr key={row.row_number} className="border-t border-[var(--color-border)]">
+                <td className="px-2 py-1">
+                  <input
+                    type="checkbox"
+                    aria-label={`Selecionar linha ${row.row_number}`}
+                    checked={selected.has(row.row_number)}
+                    onChange={(e) => {
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(row.row_number);
+                        else next.delete(row.row_number);
+                        return next;
+                      });
+                      setScope("manual");
+                    }}
+                  />
+                </td>
                 <td className="px-2 py-1 text-[var(--color-muted)]">{row.row_number}</td>
                 {row.values.map((value, i) => (
                   <td key={i} className="px-2 py-1 text-xs">
@@ -267,6 +301,57 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
           Próxima
         </button>
       </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              const result = await selectRows(datasetId, q, filters);
+              setSelected(new Set(result.row_numbers));
+              setScope("filter");
+              setSelectMessage(null);
+            } catch (error) {
+              setSelectMessage(errorText(error));
+            }
+          }}
+          className={buttonClass}
+        >
+          Selecionar todas que casam com os filtros
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setSelected(new Set());
+            setScope("manual");
+          }}
+          disabled={selected.size === 0}
+          className={buttonClass}
+        >
+          Limpar seleção
+        </button>
+        {selectMessage ? (
+          <span role="alert" className="text-[var(--color-danger)]">
+            {selectMessage}
+          </span>
+        ) : null}
+      </div>
+
+      <RowActions
+        datasetId={datasetId}
+        columns={columns}
+        selected={[...selected].sort((a, b) => a - b)}
+        onApplied={() => {
+          setSelected(new Set());
+          setScope("manual");
+        }}
+        scopeLabel={
+          scope === "filter"
+            ? "todas as linhas que casam com os filtros"
+            : scope === "page"
+              ? "linhas da página atual"
+              : "seleção manual"
+        }
+      />
     </section>
   );
 }

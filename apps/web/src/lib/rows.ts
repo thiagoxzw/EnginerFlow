@@ -108,3 +108,26 @@ export function buildRowsParams(query: RowsQuery): URLSearchParams {
 export function queryRows(datasetId: string, query: RowsQuery): Promise<RowsPage> {
   return apiFetch<RowsPage>(`/api/v1/datasets/${datasetId}/rows?${buildRowsParams(query)}`);
 }
+
+export interface SelectionPage {
+  count: number;
+  row_numbers: number[];
+}
+
+/** Números de TODAS as linhas que casam com os filtros atuais (não só a página). */
+export function selectRows(
+  datasetId: string,
+  q: string,
+  filters: FilterClause[],
+): Promise<SelectionPage> {
+  const complete = filters.filter(isComplete).map((f) => ({
+    column: f.column,
+    op: f.op,
+    ...(f.value !== undefined && f.op !== "is_empty" ? { value: f.value } : {}),
+    ...(f.op === "between" ? { value2: f.value2 } : {}),
+  }));
+  return apiFetch<SelectionPage>(`/api/v1/datasets/${datasetId}/rows/selection`, {
+    method: "POST",
+    body: JSON.stringify({ q: q.trim(), filters: complete }),
+  });
+}

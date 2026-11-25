@@ -24,7 +24,7 @@ from engiflow_api.application.data_studio import (
     set_mapping,
     sweep_stale_temp_files,
 )
-from engiflow_api.application.table_query import query_page
+from engiflow_api.application.table_query import matching_row_numbers, query_page
 from engiflow_api.core.config import get_settings
 from engiflow_api.domain.errors import DomainError
 from engiflow_api.domain.query import MAX_SEARCH, FilterIn, TableQuery
@@ -299,6 +299,27 @@ def rows(
         columns=list(dataset.columns),
         rows=[RowOut(row_number=n, values=list(v)) for n, v in page],
     )
+
+
+class SelectionIn(BaseModel):
+    q: str = Field(default="", max_length=MAX_SEARCH)
+    filters: list[FilterIn] = Field(default_factory=list, max_length=20)
+
+
+class SelectionOut(BaseModel):
+    count: int
+    row_numbers: list[int]
+
+
+@router.post("/{dataset_id}/rows/selection", response_model=SelectionOut)
+def select_rows(
+    dataset_id: str, payload: SelectionIn, user: CurrentUser, db: DbDep
+) -> SelectionOut:
+    """Números das linhas que casam com filtros e pesquisa (para ações em lote)."""
+    dataset = get_dataset(db, dataset_id)
+    query = TableQuery(filters=list(payload.filters), search=payload.q)
+    numbers = matching_row_numbers(db, dataset, query)
+    return SelectionOut(count=len(numbers), row_numbers=numbers)
 
 
 @router.put("/{dataset_id}/mapping", response_model=DatasetSummary)

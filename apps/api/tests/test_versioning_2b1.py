@@ -105,6 +105,7 @@ def test_registry_lists_the_minimal_operations() -> None:
         "set_mapping",
         "apply_mapping_template",
         "set_header_row",
+        "delete_rows",
         "replace_text",
         "set_rows_value",
     }
@@ -239,6 +240,7 @@ def test_catalog_endpoint_exposes_schemas(
         "set_mapping",
         "apply_mapping_template",
         "set_header_row",
+        "delete_rows",
         "replace_text",
         "set_rows_value",
     }

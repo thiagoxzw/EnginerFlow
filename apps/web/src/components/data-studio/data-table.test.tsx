@@ -68,7 +68,7 @@ describe("DataTable", () => {
   it("ordena pelo cabeçalho em ciclo asc, desc e sem ordenação", async () => {
     const user = userEvent.setup();
     renderTable();
-    const header = (await screen.findByText("Qtd")).closest("th");
+    const header = (await screen.findByRole("columnheader", { name: /Qtd/ })).closest("th");
     expect(header).toHaveAttribute("aria-sort", "none");
 
     await user.click(within(header as HTMLElement).getByRole("button"));
