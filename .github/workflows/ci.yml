@@ -92,7 +92,7 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       ENGIFLOW_DATABASE_URL: postgresql+psycopg://engiflow:ci-only-password@127.0.0.1:5432/engiflow_e2e
-      ENGIFLOW_DATA_DIR: ${{ runner.temp }}/engiflow-data
+      ENGIFLOW_DATA_DIR: /tmp/engiflow-data
       ENGIFLOW_FRONTEND_ORIGIN: http://127.0.0.1:3000
       ENGIFLOW_COOKIE_SECURE: "false"
       ENGIFLOW_API_URL: http://127.0.0.1:8000
