@@ -109,6 +109,11 @@ def test_registry_lists_the_minimal_operations() -> None:
         "replace_text",
         "set_rows_value",
         "set_cells",  # colagem em uma operação (2B.3)
+        "insert_rows",  # estrutura (Fase 3)
+        "duplicate_rows",
+        "insert_column",
+        "duplicate_column",
+        "delete_columns",
     }
     with pytest.raises(DomainError, match="desconhecida"):
         get_operation("eval_python")
@@ -245,6 +250,11 @@ def test_catalog_endpoint_exposes_schemas(
         "replace_text",
         "set_rows_value",
         "set_cells",  # colagem em uma operação (2B.3)
+        "insert_rows",  # estrutura (Fase 3)
+        "duplicate_rows",
+        "insert_column",
+        "duplicate_column",
+        "delete_columns",
     }
     assert all("properties" in item["params_schema"] for item in body)
 

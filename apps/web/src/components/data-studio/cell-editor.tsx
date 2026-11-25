@@ -37,6 +37,20 @@ export async function commitCells(datasetId: string, cells: PasteCell[]): Promis
   await applyOperation(datasetId, preview.preview_id, state);
 }
 
+/**
+ * Operação estrutural (linhas e colunas) pelo mesmo caminho de prévia e aplicação: versionada,
+ * registrada no histórico e desfazível. Não há gravação direta.
+ */
+export async function commitOperation(
+  datasetId: string,
+  code: string,
+  params: Record<string, unknown>,
+): Promise<void> {
+  const state = await getDatasetState(datasetId);
+  const preview = await previewOperation(datasetId, code, params, state);
+  await applyOperation(datasetId, preview.preview_id, state);
+}
+
 /** Texto inicial da edição: vazio e desconhecido começam em branco (a diferença fica visível na exibição). */
 export function editableText(value: string | null): string {
   return value ?? "";

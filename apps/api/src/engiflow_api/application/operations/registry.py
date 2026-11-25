@@ -364,6 +364,157 @@ def _set_mapping(snapshot: Snapshot, params: SetMappingParams) -> OperationResul
     )
 
 
+MAX_NEW_ROWS = 1_000
+MAX_DELETED_COLUMNS = 100
+
+
+class InsertRowsParams(_Strict):
+    # 0 = inserir no início. Novas linhas ficam vazias ("" em cada célula).
+    after_row_number: int = Field(ge=0)
+    count: int = Field(ge=1, le=MAX_NEW_ROWS)
+
+
+def _next_row_number(snapshot: Snapshot) -> int:
+    return max(snapshot.row_numbers, default=0) + 1
+
+
+def _insert_rows(snapshot: Snapshot, params: InsertRowsParams) -> OperationResult:
+    """Insere linhas vazias após uma linha existente. Números novos, sem renumerar as demais."""
+    if params.after_row_number and params.after_row_number not in snapshot.row_numbers:
+        raise DomainError(f"Linha {params.after_row_number} não existe nesta versão.")
+    width = len(snapshot.columns)
+    first = _next_row_number(snapshot)
+    fresh_numbers = list(range(first, first + params.count))
+    fresh_rows: list[list[str | None]] = [[""] * width for _ in fresh_numbers]
+    rows: list[list[str | None]] = []
+    numbers: list[int] = []
+    if params.after_row_number == 0:
+        rows.extend(fresh_rows)
+        numbers.extend(fresh_numbers)
+    for number, row in zip(snapshot.row_numbers, snapshot.rows, strict=True):
+        rows.append(row)
+        numbers.append(number)
+        if number == params.after_row_number:
+            rows.extend(fresh_rows)
+            numbers.extend(fresh_numbers)
+    return OperationResult(
+        snapshot=_with(snapshot, rows=rows, row_numbers=numbers),
+        rows_affected=params.count,
+        cells_changed=params.count * width,
+    )
+
+
+class DuplicateRowsParams(_Strict):
+    row_numbers: list[int] = Field(min_length=1, max_length=MAX_SELECTED_ROWS)
+
+
+def _duplicate_rows(snapshot: Snapshot, params: DuplicateRowsParams) -> OperationResult:
+    """Cada linha selecionada ganha uma cópia logo abaixo, com número novo."""
+    selected = set(params.row_numbers)
+    present = {n for n in snapshot.row_numbers if n in selected}
+    missing = sorted(selected - present)
+    if missing:
+        raise DomainError(
+            f"Linhas inexistentes na versão atual: {', '.join(str(n) for n in missing[:10])}."
+        )
+    next_number = _next_row_number(snapshot)
+    rows: list[list[str | None]] = []
+    numbers: list[int] = []
+    for number, row in zip(snapshot.row_numbers, snapshot.rows, strict=True):
+        rows.append(row)
+        numbers.append(number)
+        if number in selected:
+            rows.append(list(row))
+            numbers.append(next_number)
+            next_number += 1
+    return OperationResult(
+        snapshot=_with(snapshot, rows=rows, row_numbers=numbers),
+        rows_affected=len(present),
+        cells_changed=len(present) * len(snapshot.columns),
+    )
+
+
+class InsertColumnParams(_Strict):
+    # None = inserir no fim. Nova coluna começa vazia ("") em todas as linhas.
+    after_column: str | None = Field(default=None, min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
+
+
+def _check_new_column_name(snapshot: Snapshot, name: str) -> str:
+    target = name.strip()
+    if not target:
+        raise DomainError("Nome da coluna não pode ser vazio.")
+    if target.casefold() in {c.casefold() for c in snapshot.columns}:
+        raise DomainError(f"Já existe uma coluna chamada '{target}'.")
+    return target
+
+
+def _insert_column(snapshot: Snapshot, params: InsertColumnParams) -> OperationResult:
+    target = _check_new_column_name(snapshot, params.name)
+    position = (
+        len(snapshot.columns)
+        if params.after_column is None
+        else _column_index(snapshot, params.after_column) + 1
+    )
+    columns = [*snapshot.columns[:position], target, *snapshot.columns[position:]]
+    rows = [[*row[:position], "", *row[position:]] for row in snapshot.rows]
+    return OperationResult(
+        snapshot=_with(snapshot, columns=columns, rows=rows),
+        rows_affected=0,
+        cells_changed=len(rows),
+    )
+
+
+class DuplicateColumnParams(_Strict):
+    column: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
+
+
+def _duplicate_column(snapshot: Snapshot, params: DuplicateColumnParams) -> OperationResult:
+    """Copia uma coluna para logo à direita. Desconhecidos (None) são copiados como estão."""
+    index = _column_index(snapshot, params.column)
+    target = _check_new_column_name(snapshot, params.name)
+    columns = [*snapshot.columns[: index + 1], target, *snapshot.columns[index + 1 :]]
+    rows = [[*row[: index + 1], row[index], *row[index + 1 :]] for row in snapshot.rows]
+    return OperationResult(
+        snapshot=_with(snapshot, columns=columns, rows=rows),
+        rows_affected=0,
+        cells_changed=len(rows),
+    )
+
+
+class DeleteColumnsParams(_Strict):
+    columns: list[str] = Field(min_length=1, max_length=MAX_DELETED_COLUMNS)
+
+
+def _delete_columns(snapshot: Snapshot, params: DeleteColumnsParams) -> OperationResult:
+    """Exclusão lógica de colunas: continuam nas versões anteriores e voltam pelo desfazer.
+
+    Campos do mapeamento que apontavam para uma coluna excluída são removidos e avisados.
+    """
+    if len(set(params.columns)) != len(params.columns):
+        raise DomainError("Colunas repetidas na exclusão.")
+    drop = {_column_index(snapshot, name) for name in params.columns}
+    if len(drop) >= len(snapshot.columns):
+        raise DomainError("Não é possível excluir todas as colunas da tabela.")
+    keep = [i for i in range(len(snapshot.columns)) if i not in drop]
+    columns = [snapshot.columns[i] for i in keep]
+    rows = [[row[i] for i in keep] for row in snapshot.rows]
+    removed = {snapshot.columns[i] for i in drop}
+    mapping = {f: c for f, c in snapshot.mapping.items() if c not in removed}
+    warnings = [
+        f"Campo '{f}' sem coluna após a exclusão ('{c}'): mapeamento removido."
+        for f, c in snapshot.mapping.items()
+        if c in removed
+    ]
+    return OperationResult(
+        snapshot=_with(snapshot, columns=columns, rows=rows, mapping=mapping),
+        rows_affected=len(rows),
+        cells_changed=len(rows) * len(drop),
+        warnings=warnings,
+    )
+
+
 @dataclass(frozen=True)
 class OperationSpec:
     code: str
@@ -454,6 +605,53 @@ OPERATIONS: dict[str, OperationSpec] = {
         reversible=True,
         touches_data=True,
         apply=_set_cells,
+    ),
+    "insert_rows": OperationSpec(
+        code="insert_rows",
+        version=1,
+        description="Insere linhas vazias após uma linha (0 = início). "
+        "Números das demais preservados.",
+        params_model=InsertRowsParams,
+        reversible=True,
+        touches_data=True,
+        apply=_insert_rows,
+    ),
+    "duplicate_rows": OperationSpec(
+        code="duplicate_rows",
+        version=1,
+        description="Duplica as linhas selecionadas, cada cópia logo abaixo do original.",
+        params_model=DuplicateRowsParams,
+        reversible=True,
+        touches_data=True,
+        apply=_duplicate_rows,
+    ),
+    "insert_column": OperationSpec(
+        code="insert_column",
+        version=1,
+        description="Insere uma coluna vazia após outra (ou no fim). Mapeamento preservado.",
+        params_model=InsertColumnParams,
+        reversible=True,
+        touches_data=True,
+        apply=_insert_column,
+    ),
+    "duplicate_column": OperationSpec(
+        code="duplicate_column",
+        version=1,
+        description="Duplica uma coluna para a direita, copiando os valores.",
+        params_model=DuplicateColumnParams,
+        reversible=True,
+        touches_data=True,
+        apply=_duplicate_column,
+    ),
+    "delete_columns": OperationSpec(
+        code="delete_columns",
+        version=1,
+        description="Exclui logicamente colunas (podem ser desfeitas). "
+        "Remove campos do mapeamento que apontavam para elas.",
+        params_model=DeleteColumnsParams,
+        reversible=True,
+        touches_data=True,
+        apply=_delete_columns,
     ),
 }
 

@@ -1,9 +1,15 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import {
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 
-import { EditableCell, commitCells } from "@/components/data-studio/cell-editor";
+import { EditableCell, commitCells, commitOperation } from "@/components/data-studio/cell-editor";
+import { StructureMenu, type MenuItem } from "@/components/data-studio/structure-menu";
 import { RowActions } from "@/components/data-studio/row-actions";
 import { errorText } from "@/components/data-studio/templates-section";
 import { copyText, parseTsv, planPaste, type CellTarget, type PasteCell, type PastePlan } from "@/lib/clipboard";
@@ -72,6 +78,14 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const [pendingClear, setPendingClear] = useState<{ scope: string; cells: PasteCell[] } | null>(null);
   const scopeKey = `${offset}|${limit}|${q}|${JSON.stringify(sort)}|${JSON.stringify(filters)}`;
   const range = selection && selection.scope === scopeKey ? selection.range : null;
+  // Menu contextual (linha ou coluna) e ação estrutural que aguarda confirmação (exclusão de coluna).
+  const [menu, setMenu] = useState<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+  const [pendingAction, setPendingAction] = useState<{
+    scope: string;
+    message: string;
+    confirmLabel: string;
+    run: () => Promise<void>;
+  } | null>(null);
 
   function commitRange(next: CellRange | null) {
     setSelection(next ? { scope: scopeKey, range: next } : null);
@@ -197,6 +211,114 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
       setPasting(false);
       setPendingClear(null);
     }
+  }
+
+  /** Executa uma operação estrutural e registra a mensagem; erros aparecem sem alterar nada. */
+  async function runStructure(code: string, params: Record<string, unknown>, message: string) {
+    setPasting(true);
+    setPasteMessage(null);
+    try {
+      await commitOperation(datasetId, code, params);
+      await invalidateDataset(queryClient, datasetId);
+      setActionMessage(message);
+    } catch (error) {
+      setPasteMessage(errorText(error));
+    } finally {
+      setPasting(false);
+      setPendingAction(null);
+    }
+  }
+
+  /** Nome livre para uma coluna nova: “base”, “base 2”, “base 3”… sem conflito de maiúsculas. */
+  function freeColumnName(base: string): string {
+    const taken = new Set(columns.map((c) => c.toLowerCase()));
+    let name = base;
+    let n = 2;
+    while (taken.has(name.toLowerCase())) {
+      name = `${base} ${n}`;
+      n += 1;
+    }
+    return name;
+  }
+
+  function openRowMenu(event: ReactMouseEvent, rowNumber: number) {
+    event.preventDefault();
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      label: `Linha ${rowNumber}`,
+      items: [
+        {
+          label: "Inserir linha abaixo",
+          run: () =>
+            void runStructure(
+              "insert_rows",
+              { after_row_number: rowNumber, count: 1 },
+              `Linha vazia inserida após a linha ${rowNumber}. Desfazer reverte.`,
+            ),
+        },
+        {
+          label: "Duplicar linha",
+          run: () =>
+            void runStructure(
+              "duplicate_rows",
+              { row_numbers: [rowNumber] },
+              `Linha ${rowNumber} duplicada. Desfazer reverte.`,
+            ),
+        },
+        {
+          label: "Excluir linha",
+          danger: true,
+          run: () =>
+            void runStructure(
+              "delete_rows",
+              { row_numbers: [rowNumber] },
+              `Linha ${rowNumber} excluída logicamente. Desfazer reverte.`,
+            ),
+        },
+      ],
+    });
+  }
+
+  function openColumnMenu(event: ReactMouseEvent, column: string) {
+    event.preventDefault();
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      label: `Coluna ${column}`,
+      items: [
+        {
+          label: "Inserir coluna à direita",
+          run: () =>
+            void runStructure(
+              "insert_column",
+              { after_column: column, name: freeColumnName("Nova coluna") },
+              "Coluna vazia inserida. Renomeie-a pelo cabeçalho se precisar. Desfazer reverte.",
+            ),
+        },
+        {
+          label: "Duplicar coluna",
+          run: () =>
+            void runStructure(
+              "duplicate_column",
+              { column, name: freeColumnName(`${column} (cópia)`) },
+              `Coluna ${column} duplicada. Desfazer reverte.`,
+            ),
+        },
+        {
+          label: "Excluir coluna",
+          danger: true,
+          run: () =>
+            setPendingAction({
+              scope: scopeKey,
+              message: `Excluir a coluna “${column}”? Exclusão lógica: o desfazer a restaura.`,
+              confirmLabel: "Confirmar exclusão",
+              run: () =>
+                runStructure("delete_columns", { columns: [column] }, `Coluna ${column} excluída. Desfazer reverte.`),
+            }),
+        },
+      ],
+    });
   }
 
   /** Ctrl+A fora da edição seleciona as células da página exibida (nunca as de outras páginas). */
@@ -412,6 +534,7 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                 return (
                   <th
                     key={c}
+                    onContextMenu={(e) => openColumnMenu(e, c)}
                     className="px-2 py-1 font-medium"
                     aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
                   >
@@ -443,7 +566,12 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
                     }}
                   />
                 </td>
-                <td className="px-2 py-1 text-[var(--color-muted)]">{row.row_number}</td>
+                <td
+                  className="px-2 py-1 text-[var(--color-muted)]"
+                  onContextMenu={(e) => openRowMenu(e, row.row_number)}
+                >
+                  {row.row_number}
+                </td>
                 {row.values.map((value, i) =>
                   hidden.has(columns[i] ?? "") ? null : (
                     <EditableCell
@@ -563,6 +691,33 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
             Cancelar
           </button>
         </div>
+      ) : null}
+
+      {pendingAction && pendingAction.scope === scopeKey ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+          <span>{pendingAction.message}</span>
+          <button
+            type="button"
+            onClick={() => void pendingAction.run()}
+            disabled={pasting}
+            className={buttonClass}
+          >
+            {pendingAction.confirmLabel}
+          </button>
+          <button type="button" onClick={() => setPendingAction(null)} disabled={pasting} className={buttonClass}>
+            Cancelar
+          </button>
+        </div>
+      ) : null}
+
+      {menu ? (
+        <StructureMenu
+          x={menu.x}
+          y={menu.y}
+          label={menu.label}
+          items={menu.items}
+          onClose={() => setMenu(null)}
+        />
       ) : null}
 
       {pendingClear && pendingClear.scope === scopeKey ? (
