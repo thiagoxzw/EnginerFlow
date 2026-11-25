@@ -157,3 +157,9 @@ Itens marcados **[PG]** exigem validação em PostgreSQL 17 no CI. Itens **[M]**
 - **Pesquisa e ordenação acento-insensíveis** em aplicação podem ser lentas em volume grande. Mitigação: medição e, se preciso, coluna de chave normalizada em tabela auxiliar (decisão na medição).
 - **Cabeçalho escolhido após transformações**: `set_header_row` sempre parte do original; transformações anteriores são recalculadas a partir dele não automaticamente. Decisão: ao mudar o cabeçalho, as operações posteriores são marcadas como `undone` (com aviso prévio na UI). Alternativa rejeitada: reaplicar automaticamente (risco de alteração silenciosa).
 - **Exclusão lógica** mantém dados sensíveis em disco até a purga. Documentado; purga é decisão explícita futura.
+
+---
+
+## Estado de execução (atualizado na homologação)
+
+Todos os blocos 1 a 8 foram implementados na branch `feat/fase-2b-2-data-manipulation`, com testes de API, componentes, E2E e medições em PostgreSQL 17. O detalhamento de resultados, limitações e a matriz de critérios está em `docs/operations/FASE_2B2_STATUS.md`. Nenhum critério foi alterado em relação ao plano aprovado; limitações de desempenho (cópia completa de versões de dados, carga de tabela em memória nas operações de dados, ausência de índices) estão registradas e foram encaminhadas para a 2B.4.
