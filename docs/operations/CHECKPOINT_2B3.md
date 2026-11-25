@@ -46,3 +46,10 @@ Ver a seção 7 de `FASE_2B3_STATUS.md`.
 - Validação: API 330, web 106, E2E 28 aprovados (1 pulado por design). CI run #68 verde.
 - Demonstrativo reconstruído (API e web); volumes e dados preservados.
 - Pendências abertas: compressão e retenção de snapshots; modelo híbrido snapshot+incremental (possibilidade futura, sem migração destrutiva); virtualização (futura, paginação atende). Fase 4 e BOM Manager não iniciados.
+
+## Fase 4 — BOM Manager (2026-11-25)
+- PR #4 (Fase 2B.3 e Fase 3) mesclado na `main` em `bc7351d`, com autorização e CI #70 aprovado.
+- Branch `feat/fase-4-bom-manager`. Status e limitações em `docs/operations/FASE_4_BOM_MANAGER.md`.
+- Migração `0007_bom_manager` (só cria tabelas). Validada em PostgreSQL 17 e no stack E2E.
+- Demonstrativo: API e web reconstruídas. Estrutura sintética `SYN Ônibus elétrico (demonstração)` e cadastro `SYN-cadastro-materiais-demo` criados pela API. Dados anteriores preservados (41 registros) e backup feito antes da migração.
+- Não há PR aberto da Fase 4 nem merge. Não iniciar a Fase 5 sem autorização.

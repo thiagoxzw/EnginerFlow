@@ -1,0 +1,93 @@
+# Fase 4 — BOM Manager (status de entrega)
+
+Atualizado em 2026-11-25. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN`). Nenhum dado real.
+
+## Entregue
+
+- **Importação com mapeamento:** tabela do Data Studio (CSV, XLSX, ERP ou CAD) com assistente de
+  mapeamento. A sugestão é pelos nomes das colunas e pode ser alterada. Campos obrigatórios:
+  código do componente, quantidade e pai (ou nível). Os demais são opcionais. Prévia antes de confirmar.
+- **Dois modos de hierarquia:** coluna de conjunto pai (explícito) e níveis hierárquicos. No modo
+  por nível, o pai é a última linha do nível anterior e aparece marcado como inferido. Sem nível
+  anterior, o pai fica vazio e a validação aponta.
+- **Árvore de materiais:** expandir e recolher por conjunto, expandir ou recolher tudo, busca por
+  código, código alternativo, descrição ou part number, com destaque e expansão do caminho até o
+  resultado. Filtros por nível, unidade, revisão e categoria. Alternância entre árvore e tabela.
+  Quantidades local e acumulada por unidade do topo (decimal exato no navegador). Painel de detalhes
+  com "aparece em" e navegação até o conjunto pai.
+- **Edições:** quantidade, descrição (em todas as ocorrências do código), adicionar componente,
+  mover para outro conjunto, duplicar conjunto (filhos diretos) e remover linha. Cada edição cria
+  uma nova revisão; a anterior permanece.
+- **Histórico:** desfazer e refazer apenas trocam a revisão atual. Nenhuma revisão é apagada.
+- **Explosão:** por veículo, com consolidação por código e unidade (unidades diferentes não são
+  somadas), ocorrências por aparição na estrutura, e avisos para linhas com quantidade inválida.
+  Ciclos são recusados antes do cálculo.
+- **Comparação entre revisões:** quantidade, transferência entre conjuntos, unidade, descrição,
+  revisão, sem correspondência, e possível troca de código (sempre pendente, nunca aplicada).
+- **Validação:** erro, alerta e informação. Regras: sem código, sem descrição, quantidade ausente,
+  inválida, negativa ou zerada, pai inexistente, ciclo, órfão, unidade incompatível, revisão
+  conflitante, descrição divergente, duplicidade no mesmo conjunto, e nível inconsistente (modo por nível).
+  Navegação direta para a linha. Nada é alterado automaticamente.
+- **Cruzamento com cadastro:** tabela de cadastro escolhida pelo usuário, com coluna de código,
+  descrição e unidade configuráveis. Situações: encontrado, sem cadastro, múltiplas correspondências,
+  descrição e unidade divergentes, e possível equivalente (pendente). Comparação de códigos exata
+  ou normalizada. Nenhum código é atribuído automaticamente.
+- **Kits:** criação com subconjuntos e quantidade por kit, cálculo por veículo e lote, comparação de
+  composição entre dois kits (só em um, quantidade diferente), e lista de separação em CSV.
+- **Exportações (XLSX e CSV):** lista de componentes, consolidada, hierárquica (com nível e
+  quantidades local e acumulada), inconsistências e comparação entre revisões. A lista de separação
+  de kits é gerada no navegador.
+- **Auditoria:** criação de estrutura, edição, mudança de revisão atual e criação de kit são registradas.
+
+## Arquitetura
+
+- Domínio puro em `domain/bom.py`: explosão com memória por conjunto, detecção de ciclos,
+  comparação, validação e kits. Sem banco e sem arquivo.
+- Aplicação em `application/bom.py` e `application/bom_export.py`. Reutiliza o leitor de versões do
+  Data Studio, o formato de exportação e a auditoria.
+- Persistência em tabelas próprias `bom_structures`, `bom_revisions`, `bom_lines` e `bom_kits`
+  (modelos em `infrastructure/bom_models.py`). Quantidades e códigos são texto: zeros à esquerda,
+  caracteres especiais e valores desconhecidos são preservados.
+- Rotas em `presentation/routes/bom.py`, sob `/api/v1/bom`.
+- Interface em `components/bom/` e `app/bom`. Funções puras da árvore em `lib/bom-tree.ts`.
+
+## Migrações
+
+- `0007_bom_manager`: cria as quatro tabelas acima e seus índices. Não altera tabela existente.
+  Downgrade remove apenas essas tabelas.
+- Validada em PostgreSQL 17 (upgrade, downgrade e novo upgrade) em banco descartável, e no stack
+  E2E isolado. No SQLite, a mesma sequência também passa.
+
+## Testes
+
+- Domínio: `tests/test_bom_domain_4.py` (16), incluindo o exemplo do pedido: 2 conjuntos A, 4
+  componentes B por A, 8 por veículo e 80 para 10 veículos.
+- API: `tests/test_bom_api_4.py` (12): importação, prévia, zero à esquerda, explosão, edição com
+  nova revisão e desfazer, ciclo recusado, comparação, validação, cruzamento, kits e exportações.
+- Interface (unitários): `lib/bom-tree.test.ts` (decimal exato, árvore, busca, filtros) e
+  `components/bom/bom-import.test.ts` (sugestão de mapeamento).
+- E2E: `e2e/bom.spec.ts` (4 testes): importação com cálculo de explosão, edição com desfazer,
+  validação de erro e cálculo de kit.
+
+## Limitações conhecidas
+
+- Desfazer e refazer são por revisão, e não por operação dentro da revisão.
+- Duplicar conjunto copia só os filhos diretos. Subconjuntos mais profundos continuam compartilhados.
+- A lista de materiais de um kit é informada em texto (`código;quantidade`). Não há importação de
+  lista de kits na interface, embora a API aceite criação de kits.
+- Edições em massa pela árvore são uma a uma. A API aceita lista de alterações.
+- Cruzamento por código exato ou normalizado. Equivalentes são sugeridos só por descrição normalizada.
+- A árvore renderiza até 1500 linhas visíveis. Não há virtualização; a busca e a expansão controlam o volume.
+- Exportação hierárquica limitada a 200 mil linhas.
+- Sem conexão direta com Protheus ou Solid Edge, conforme o escopo. Sem movimentação de estoque.
+- Não houve benchmark dedicado do BOM com milhares de componentes. O cálculo é memorizado por conjunto,
+  mas o desempenho com estruturas grandes ainda não foi medido.
+- Capturas de tela: uma captura da página no demonstrativo, com "Carregando…" na lista. Não há
+  conjunto de capturas por seção nesta entrega.
+
+## Próximas melhorias (não críticas)
+
+- Desfazer por operação dentro da revisão.
+- Virtualização da árvore e medição de desempenho com milhares de linhas.
+- Importação de listas de kits na interface e seleção manual de componentes.
+- Contratos de integração para Material Manager, Solid Edge Connect, Inventory Manager e ERP Connect: não preparados nesta entrega (o pedido previa apenas contratos, sem implementação).
