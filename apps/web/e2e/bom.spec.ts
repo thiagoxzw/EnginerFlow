@@ -136,3 +136,28 @@ test("kit calcula materiais por veículo e lote", async ({ page }) => {
   // Motor: 4 por kit × 2 kits × 10 veículos = 80.
   await expect(page.getByRole("row").filter({ hasText: "COMP-SYN-MOT" })).toContainText("80");
 });
+
+test("duplicação completa cria códigos provisórios marcados e não altera o original", async ({ page }) => {
+  const uid = `${Date.now()}`;
+  const extra = [
+    `CONJ-SYN-TRAC;SUBI-SYN-${uid};Subconjunto interno;1;UN;`,
+    `SUBI-SYN-${uid};FOLHA-SYN-${uid};Componente folha;3;UN;`,
+  ].join("\n");
+  const table = await importTable(page, uid, bomCsv(uid, extra));
+  const structure = `BOM SYN dup ${uid}`;
+  await importBom(page, table, structure);
+
+  await page.getByRole("tab", { name: "Estrutura" }).click();
+  await page.getByLabel("Buscar na estrutura").fill("CONJ-SYN-TRAC");
+  await page.getByRole("button", { name: /CONJ-SYN-TRAC/ }).first().click();
+  await page.getByLabel("Novo código do conjunto duplicado").fill(`CONJ-COPIA-${uid}`);
+  await page.getByRole("button", { name: "Duplicar conjunto completo" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Conjunto completo duplicado" })).toBeVisible();
+
+  // O subconjunto interno foi copiado com código provisório, marcado na árvore.
+  await page.getByLabel("Buscar na estrutura").fill("-CP");
+  await expect(page.getByText("provisório").first()).toBeVisible();
+  // O original continua com o código oficial.
+  await page.getByLabel("Buscar na estrutura").fill(`SUBI-SYN-${uid}`);
+  await expect(page.getByRole("button", { name: new RegExp(`SUBI-SYN-${uid}`) }).first()).toBeVisible();
+});
