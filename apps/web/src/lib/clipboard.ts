@@ -152,5 +152,6 @@ export function copyText(
   if (selectedRows.length > 0) {
     return serializeTsv(selectedRows.map((row) => row.map((v) => v ?? "")));
   }
-  return focusValue ?? "";
+  // Célula única usa o mesmo formato TSV das demais: tabulação, quebra e aspa ficam entre aspas.
+  return serializeTsv([[focusValue ?? ""]]);
 }

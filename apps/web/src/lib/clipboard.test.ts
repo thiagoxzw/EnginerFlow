@@ -105,6 +105,11 @@ describe("copyText", () => {
     expect(copyText(null, [])).toBe("");
   });
 
+  it("célula única com tabulação, quebra ou aspa sai entre aspas, como no Excel", () => {
+    expect(copyText('diz "oi"\tali', [])).toBe('"diz ""oi""\tali"');
+    expect(parseTsv(copyText("x\r\ny", []))).toEqual([["x\r\ny"]]);
+  });
+
   it("copia as linhas selecionadas em TSV, mantendo o texto original", () => {
     expect(
       copyText("ignorado", [
