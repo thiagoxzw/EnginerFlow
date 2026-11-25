@@ -88,3 +88,50 @@ test("chave inválida: tabela de busca sem coluna escolhida mantém o botão des
   // Sem a coluna da busca escolhida, a prévia não é enviada.
   await expect(procv.getByRole("button", { name: "Gerar prévia" })).toBeDisabled();
 });
+
+test("duplicidades, chave vazia e zeros: contagens exatas, política de erro e exportação XLSX", async ({
+  page,
+}) => {
+  // Consulta: 00123/PC (x2) tem duas correspondências; 0123/PC não existe; a linha 3 tem chave vazia.
+  // Busca: 00123/PC duplicado; AB1/CX e AB1/PC distintos. Chave composta: Código + Unidade.
+  await importAndOpen(page, "SYN-procv-busca.csv", "SYN-procv-busca");
+  await importAndOpen(page, "SYN-procv-consulta.csv", "SYN-procv-consulta");
+  await page.locator("summary", { hasText: "Cruzar com outra tabela (PROCV)" }).click();
+  const procv = page.locator("details", { hasText: "Cruzar com outra tabela (PROCV)" });
+
+  await procv.locator("#sp-right").selectOption({ label: "SYN-procv-busca" });
+  await procv.locator("#sp-lk-0").selectOption("Código");
+  await procv.locator("#sp-rk-0").selectOption("Código");
+  await procv.getByRole("button", { name: "Adicionar chave" }).click();
+  await procv.locator("#sp-lk-1").selectOption("Unidade");
+  await procv.locator("#sp-rk-1").selectOption("Unidade");
+  await procv.getByRole("checkbox", { name: "Descrição" }).check();
+
+  // Política "Recusar a operação": duplicidade deve gerar erro compreensível, sem prévia.
+  await procv.locator("#sp-dup").selectOption("error");
+  await procv.getByRole("button", { name: "Gerar prévia" }).click();
+  await expect(procv.getByRole("alert")).toContainText("múltiplas correspondências");
+
+  // Volta à política padrão: contagens exatas.
+  await procv.locator("#sp-dup").selectOption("first");
+  await procv.getByRole("button", { name: "Gerar prévia" }).click();
+  const contagens = procv.getByRole("list", { name: "Contagens da prévia" });
+  await expect(contagens).toContainText("Encontrados: 1");
+  await expect(contagens).toContainText("Não encontrados: 1");
+  await expect(contagens).toContainText("Com múltiplas correspondências: 2");
+  await expect(contagens).toContainText("Chave inválida (vazia ou desconhecida): 1");
+  await expect(contagens).toContainText("Linhas no resultado: 5");
+
+  // Zeros à esquerda preservados e chave composta legível na amostra de não encontrados.
+  await expect(procv.getByText("00123", { exact: true }).first()).toBeVisible();
+  await expect(
+    procv.getByText("Chaves não encontradas (amostra): 0123 + PC", { exact: true }),
+  ).toBeVisible();
+
+  // Exportação XLSX.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    procv.getByRole("button", { name: "Exportar XLSX" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
+});
