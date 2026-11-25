@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError } from "@/lib/api";
+import { TemplatesSection } from "@/components/data-studio/templates-section";
 import {
   CANONICAL_FIELDS,
   EXPORT_COMPARE_PATH,
@@ -218,6 +219,11 @@ function DatasetPanel({ datasetId }: { datasetId: string }) {
         columns={data.columns}
         initial={data.mapping}
         onSaved={onSaved}
+      />
+
+      <TemplatesSection
+        datasetId={datasetId}
+        onApplied={() => void queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] })}
       />
 
       {data.warnings.length > 0 ? (
