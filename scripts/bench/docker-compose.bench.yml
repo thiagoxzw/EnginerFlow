@@ -1,0 +1,25 @@
+# PostgreSQL DEDICADO a benchmarks. Não é o ambiente demonstrativo.
+# Projeto Compose "engiflow-bench": volume próprio (engiflow-bench_engiflow-bench-pgdata),
+# porta própria (padrão 5552) e credenciais geradas por execução (Run-Bench.ps1).
+# Nada aqui referencia o banco pessoal. Use Run-Bench.ps1, que aplica as proteções.
+name: engiflow-bench
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: engiflow_bench
+      POSTGRES_USER: bench
+      POSTGRES_PASSWORD: ${ENGIFLOW_BENCH_PASSWORD:?defina ENGIFLOW_BENCH_PASSWORD}
+    ports:
+      - "127.0.0.1:${ENGIFLOW_BENCH_PORT:-5552}:5432"
+    volumes:
+      - engiflow-bench-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bench -d engiflow_bench"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  engiflow-bench-pgdata:
