@@ -161,7 +161,7 @@ export function BomView() {
                 ) : null}
                 {tab === "estrutura" ? (
                   <TreeView
-                    key={`${revisionId}-${focusLine ?? "none"}`}
+                    key={`focus-${focusLine ?? "none"}`}
                     revisionId={revisionId}
                     lines={data}
                     focusLine={focusLine}
