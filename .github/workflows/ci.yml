@@ -73,3 +73,73 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+  e2e:
+    name: E2E (Playwright, PostgreSQL 17)
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: engiflow_e2e
+          POSTGRES_USER: engiflow
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U engiflow -d engiflow_e2e"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      ENGIFLOW_DATABASE_URL: postgresql+psycopg://engiflow:ci-only-password@127.0.0.1:5432/engiflow_e2e
+      ENGIFLOW_DATA_DIR: ${{ runner.temp }}/engiflow-data
+      ENGIFLOW_FRONTEND_ORIGIN: http://127.0.0.1:3000
+      ENGIFLOW_COOKIE_SECURE: "false"
+      ENGIFLOW_API_URL: http://127.0.0.1:8000
+      E2E_BASE_URL: http://127.0.0.1:3000
+      E2E_EMAIL: e2e@example.com
+      E2E_PASSWORD: ci-only-e2e-password-123
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Preparar API (migrações e usuário de teste sintético)
+        working-directory: apps/api
+        run: |
+          uv sync --locked
+          uv run alembic -c alembic.ini upgrade head
+          uv run python -m engiflow_api.cli create-user --email "$E2E_EMAIL" --name "E2E" --password-env E2E_PASSWORD
+      - name: Iniciar API
+        working-directory: apps/api
+        run: |
+          nohup uv run uvicorn engiflow_api.main:create_app --factory --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/api.log" 2>&1 &
+          for i in $(seq 60); do curl -sf http://127.0.0.1:8000/health/live && break; sleep 1; done
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - name: Preparar web
+        working-directory: apps/web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm build
+      - name: Iniciar web
+        working-directory: apps/web
+        run: |
+          nohup pnpm start --port 3000 > "$RUNNER_TEMP/web.log" 2>&1 &
+          for i in $(seq 60); do curl -sf http://127.0.0.1:3000/login > /dev/null && break; sleep 1; done
+      - name: Executar E2E
+        working-directory: apps/web
+        run: pnpm e2e
+      - name: Logs em caso de falha
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/api.log" || true
+          cat "$RUNNER_TEMP/web.log" || true
