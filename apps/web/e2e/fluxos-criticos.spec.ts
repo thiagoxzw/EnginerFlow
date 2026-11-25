@@ -36,7 +36,7 @@ test("modelo com colunas ausentes exige confirmação antes de aplicar parcialme
   page,
 }) => {
   await importAndOpen(page, "SYN-tpl.csv", "SYN-tpl");
-  await page.getByText("Mapeamento, cabeçalho e modelos", { exact: true }).click();
+  await page.getByRole("tab", { name: "Mapeamento", exact: true }).click();
   const modelos = page.getByRole("region", { name: "Modelos de mapeamento" });
   const nomeModelo = "Modelo parcial " + Date.now();
 
@@ -65,7 +65,7 @@ test("modelo com colunas ausentes exige confirmação antes de aplicar parcialme
 
 test("seleção manual de cabeçalho reconstrói a tabela a partir do original", async ({ page }) => {
   await importAndOpen(page, "SYN-cab.csv", "SYN-cab");
-  await page.getByText("Mapeamento, cabeçalho e modelos", { exact: true }).click();
+  await page.getByRole("tab", { name: "Mapeamento", exact: true }).click();
   const cabecalho = page.getByRole("region", { name: "Cabeçalho" });
 
   await cabecalho.getByRole("button", { name: "Usar a linha 2 como cabeçalho" }).click();
@@ -88,7 +88,8 @@ test("exclusão e desfazer de linhas selecionadas", async ({ page }) => {
     const acoes = page.getByRole("region", { name: "Ações nas linhas selecionadas" });
     await acoes.getByRole("button", { name: "Excluir linhas" }).click();
     await acoes.getByRole("button", { name: "Confirmar" }).click();
-    await expect(acoes.getByRole("status")).toContainText("Linhas excluídas logicamente");
+    // A confirmação fica na barra da tabela: não depende da seleção, que é limpa ao concluir.
+    await expect(page.getByRole("status").filter({ hasText: "Linhas excluídas logicamente" })).toBeVisible();
     // Escopo na tabela: a prévia do cabeçalho (em "Mapeamento…", fechado) também tem valores exatos.
     const dados = page.getByRole("region", { name: "Dados" });
     await expect(dados.getByText("SYN-020", { exact: true })).toHaveCount(0);
@@ -107,7 +108,7 @@ test("exclusão e desfazer de linhas selecionadas", async ({ page }) => {
 
 test("excluir e restaurar tabela com confirmação do nome exato", async ({ page }) => {
   await importAndOpen(page, "SYN-del.csv", "SYN-del");
-  await page.locator("summary", { hasText: "Gerenciar tabela" }).click();
+  await page.getByRole("tab", { name: "Gerenciar", exact: true }).click();
   const gerenciar = page.getByRole("region", { name: "Gerenciar tabela" });
   const excluir = gerenciar.getByRole("button", { name: "Excluir tabela" });
   await expect(excluir).toBeDisabled();

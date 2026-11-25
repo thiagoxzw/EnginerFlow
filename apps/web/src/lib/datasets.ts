@@ -79,6 +79,42 @@ export function buildMappingPayload(
   return out;
 }
 
+/** Chave de idempotência para uma derivação. Repetir o envio com a mesma chave não duplica a tabela. */
+export function newIdempotencyKey(): string {
+  const random = globalThis.crypto?.randomUUID?.();
+  return random ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export interface LineageSource {
+  role: string;
+  dataset_id: string;
+  dataset_name: string;
+  version_id: string;
+  metadata_version_id: string;
+  still_active: boolean;
+}
+
+/** Rastreabilidade de uma tabela derivada (GET /api/v1/datasets/{id}/lineage). */
+export interface Lineage {
+  dataset_id: string;
+  run_id: string;
+  operation: string;
+  operation_version: number;
+  params: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  counts: Record<string, unknown>;
+  params_sha256: string;
+  result_sha256: string;
+  row_count: number;
+  actor: string;
+  created_at: string;
+  sources: LineageSource[];
+}
+
+export function getLineage(id: string): Promise<Lineage> {
+  return apiFetch<Lineage>(`/api/v1/datasets/${id}/lineage`);
+}
+
 /** Aviso exibido ao criar uma tabela derivada: nome, linhas, execução, hash e origens preservadas. */
 export function derivedNotice(result: {
   name: string;

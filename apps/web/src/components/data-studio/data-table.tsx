@@ -51,6 +51,8 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [scope, setScope] = useState<"manual" | "page" | "filter">("manual");
   const [selectMessage, setSelectMessage] = useState<string | null>(null);
+  // Confirmação de ações em linhas: fica visível mesmo depois que a seleção é limpa.
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const query: RowsQuery = {
     offset,
@@ -336,13 +338,20 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
         ) : null}
       </div>
 
+      {actionMessage ? (
+        <p role="status" className="text-sm text-[var(--color-muted)]">
+          {actionMessage}
+        </p>
+      ) : null}
+
       <RowActions
         datasetId={datasetId}
         columns={columns}
         selected={[...selected].sort((a, b) => a - b)}
-        onApplied={() => {
+        onApplied={(confirmation) => {
           setSelected(new Set());
           setScope("manual");
+          setActionMessage(confirmation);
         }}
         scopeLabel={
           scope === "filter"

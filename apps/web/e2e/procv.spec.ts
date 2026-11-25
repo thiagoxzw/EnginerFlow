@@ -39,8 +39,9 @@ test("PROCV com chave composta: prévia, contagens, zeros preservados, exportaç
 }) => {
   await importAndOpen(page, "SYN-estoque-componentes.csv", "SYN-estoque-componentes");
   await importAndOpen(page, "SYN-protheus-produtos.csv", "SYN-protheus-produtos");
-  await page.locator("summary", { hasText: "Cruzar com outra tabela (PROCV)" }).click();
-  const procv = page.locator("details", { hasText: "Cruzar com outra tabela (PROCV)" });
+  await page.getByRole("tab", { name: "Cruzar tabelas" }).click();
+  await page.getByRole("tab", { name: "Super-PROCV" }).click();
+  const procv = page.getByRole("tabpanel", { name: "Super-PROCV" });
 
   // Sem tabela de busca, a prévia não pode ser gerada.
   await expect(procv.getByRole("button", { name: "Gerar prévia" })).toBeDisabled();
@@ -81,8 +82,9 @@ test("chave inválida: tabela de busca sem coluna escolhida mantém o botão des
 }) => {
   await importAndOpen(page, "SYN-estoque-componentes.csv", "SYN-estoque-componentes");
   await importAndOpen(page, "SYN-protheus-produtos.csv", "SYN-protheus-produtos");
-  await page.locator("summary", { hasText: "Cruzar com outra tabela (PROCV)" }).click();
-  const procv = page.locator("details", { hasText: "Cruzar com outra tabela (PROCV)" });
+  await page.getByRole("tab", { name: "Cruzar tabelas" }).click();
+  await page.getByRole("tab", { name: "Super-PROCV" }).click();
+  const procv = page.getByRole("tabpanel", { name: "Super-PROCV" });
   await procv.locator("#sp-right").selectOption({ label: "SYN-estoque-componentes" });
   await procv.locator("#sp-lk-0").selectOption("B1_COD");
   // Sem a coluna da busca escolhida, a prévia não é enviada.
@@ -96,8 +98,9 @@ test("duplicidades, chave vazia e zeros: contagens exatas, política de erro e e
   // Busca: 00123/PC duplicado; AB1/CX e AB1/PC distintos. Chave composta: Código + Unidade.
   await importAndOpen(page, "SYN-procv-busca.csv", "SYN-procv-busca");
   await importAndOpen(page, "SYN-procv-consulta.csv", "SYN-procv-consulta");
-  await page.locator("summary", { hasText: "Cruzar com outra tabela (PROCV)" }).click();
-  const procv = page.locator("details", { hasText: "Cruzar com outra tabela (PROCV)" });
+  await page.getByRole("tab", { name: "Cruzar tabelas" }).click();
+  await page.getByRole("tab", { name: "Super-PROCV" }).click();
+  const procv = page.getByRole("tabpanel", { name: "Super-PROCV" });
 
   await procv.locator("#sp-right").selectOption({ label: "SYN-procv-busca" });
   await procv.locator("#sp-lk-0").selectOption("Código");

@@ -9,6 +9,7 @@ import { apiFetch } from "@/lib/api";
 import {
   derivedNotice,
   downloadExport,
+  newIdempotencyKey,
   type DatasetSummary,
   type ExportFormat,
 } from "@/lib/datasets";
@@ -96,6 +97,8 @@ export function CrossLookupSection({
   const [preview, setPreview] = useState<LookupPreview | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Chave da derivação: nasce com a prévia e é reusada numa nova tentativa (sem duplicar).
+  const [idem, setIdem] = useState(newIdempotencyKey);
 
   const right = others.find((d) => d.id === rightId);
   const rightColumns = right?.columns ?? [];
@@ -116,6 +119,7 @@ export function CrossLookupSection({
 
   async function runPreview() {
     setBusy("preview");
+    setIdem(newIdempotencyKey());
     setMessage(null);
     try {
       const result = await apiFetch<LookupPreview>(`${LOOKUP_PATH}/preview`, {
@@ -137,10 +141,12 @@ export function CrossLookupSection({
     try {
       const result = await apiFetch<DerivedResult>(`${LOOKUP_PATH}/derive`, {
         method: "POST",
+        headers: { "Idempotency-Key": idem },
         body: JSON.stringify(buildLookupBody(form())),
       });
       await queryClient.invalidateQueries({ queryKey: ["datasets"] });
       setPreview(null);
+      setIdem(newIdempotencyKey());
       onDerived(result.dataset_id, derivedNotice(result));
     } catch (error) {
       setMessage(errorText(error));

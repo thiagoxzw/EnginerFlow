@@ -37,8 +37,9 @@ test("comparação por chave composta: idênticos, removidos, adicionados e chav
   // uma linha da origem tem Código vazio.
   await importAndOpen(page, "SYN-procv-busca.csv", "SYN-procv-busca");
   await importAndOpen(page, "SYN-procv-consulta.csv", "SYN-procv-consulta");
-  await page.locator("summary", { hasText: "Comparar linhas por chave" }).click();
-  const comparacao = page.locator("details", { hasText: "Comparar linhas por chave" });
+  await page.getByRole("tab", { name: "Cruzar tabelas" }).click();
+  await page.getByRole("tab", { name: "Comparar", exact: true }).click();
+  const comparacao = page.getByRole("tabpanel", { name: "Comparar", exact: true });
 
   await comparacao.locator("#cp-right").selectOption({ label: "SYN-procv-busca" });
   await comparacao.locator("#cp-lk-0").selectOption("Código");

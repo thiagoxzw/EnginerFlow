@@ -7,7 +7,8 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { DataTable } from "@/components/data-studio/data-table";
 import { HeaderSection } from "@/components/data-studio/header-section";
-import { HistoryPanel } from "@/components/data-studio/history-panel";
+import { HistoryList, UndoRedoControls } from "@/components/data-studio/history-panel";
+import { Tabs } from "@/components/data-studio/tabs";
 import {
   DeletedTablesSection,
   TableAdminSection,
@@ -15,6 +16,7 @@ import {
 import { CrossLookupSection } from "@/components/data-studio/cross-lookup-section";
 import { AggregateSection } from "@/components/data-studio/aggregate-section";
 import { JoinSection } from "@/components/data-studio/join-section";
+import { LineagePanel } from "@/components/data-studio/lineage-panel";
 import { KeyCompareSection } from "@/components/data-studio/key-compare-section";
 import { UploadSection } from "@/components/data-studio/upload-section";
 import { ReplaceSection } from "@/components/data-studio/replace-section";
@@ -73,7 +75,7 @@ export function DataStudioView() {
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className="min-w-0 space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+        <aside className="order-last min-w-0 space-y-4 lg:order-first lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
           <UploadSection
             onImported={(id) => {
               setSelectedId(id);
@@ -127,15 +129,10 @@ export function DataStudioView() {
 
           <DeletedTablesSection />
 
-          <details open className={sectionClass}>
-            <summary className="cursor-pointer font-medium">Comparar códigos entre tabelas</summary>
-            <div className="pt-3">
-              <CompareSection datasets={datasets.data ?? []} />
-            </div>
-          </details>
+          <CompareSection datasets={datasets.data ?? []} />
         </aside>
 
-        <main className="min-w-0 space-y-6">
+        <main className="order-first min-w-0 space-y-4 lg:order-none">
           {selectedId ? (
             <>
               {notice ? (
@@ -204,125 +201,170 @@ function DatasetPanel({
   };
 
   const sheetInfo = data.sheet_name ? ` · aba ${data.sheet_name}` : "";
+  const derived = isDerived(data);
+  const openers = (allDatasets.data ?? []).filter((d) => d.id !== datasetId);
+
+  // Ordem: cabeçalho (contexto e ações) -> tabela (central) -> ferramentas em abas.
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[var(--color-border)] pb-2">
-        <div className="min-w-0">
+    <div className="space-y-3">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border)] pb-3">
+        <div className="min-w-0 space-y-1">
           <h2 className="truncate text-lg font-semibold">{data.name}</h2>
           <p className="text-xs text-[var(--color-muted)]">
-            {data.row_count} linhas · {data.columns.length} colunas{sheetInfo}
-            {isDerived(data) ? " · tabela derivada de um cruzamento (origens preservadas)" : ""}
+            {data.row_count} linhas · {data.columns.length} colunas{sheetInfo} ·{" "}
+            {derived ? "Origem: cruzamento (derivada)" : "Origem: importação"}
           </p>
+          {openers.length > 0 ? (
+            <label className="flex items-center gap-2 text-xs">
+              <span className="text-[var(--color-muted)]">Trocar tabela</span>
+              <select
+                value={datasetId}
+                onChange={(e) => onOpen(e.target.value)}
+                className="rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1"
+              >
+                <option value={datasetId}>{data.name}</option>
+                {openers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
-        <ExportButtons
-          label="Exportar"
-          onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}
-        />
-      </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <UndoRedoControls datasetId={datasetId} />
+          <ExportButtons
+            label="Exportar"
+            onExport={(fmt) => downloadExport(exportDatasetPath(datasetId), fmt)}
+          />
+        </div>
+      </header>
 
       {data.warnings.length > 0 ? (
-        <section className={sectionClass} aria-labelledby="avisos">
-          <h2 id="avisos" className="font-medium">
-            Avisos da importação
-          </h2>
-          <ul className="list-inside list-disc text-sm">
+        <details className="rounded-md border border-[var(--color-border)] p-2 text-sm">
+          <summary className="cursor-pointer">{data.warnings.length} aviso(s) da importação</summary>
+          <ul className="mt-2 list-inside list-disc">
             {data.warnings.map((w) => (
               <li key={w}>{w}</li>
             ))}
           </ul>
-        </section>
+        </details>
       ) : null}
 
       <DataTable datasetId={datasetId} columns={data.columns} />
 
-      <details open className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Transformar: localizar e substituir</summary>
-        <div className="pt-3">
-          <ReplaceSection datasetId={datasetId} columns={data.columns} />
-        </div>
-      </details>
-
-      <details open className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Histórico e desfazer</summary>
-        <div className="pt-3">
-          <HistoryPanel datasetId={datasetId} />
-        </div>
-      </details>
-
-      <details className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Mapeamento, cabeçalho e modelos</summary>
-        <div className="space-y-6 pt-3">
-          <MappingSection
-            key={datasetId}
-            datasetId={datasetId}
-            columns={data.columns}
-            initial={data.mapping}
-            onSaved={onSaved}
-          />
-          <HeaderSection datasetId={datasetId} />
-          <TemplatesSection
-            datasetId={datasetId}
-            onApplied={() => void queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] })}
-          />
-        </div>
-      </details>
-
-      <details className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Cruzar com outra tabela (PROCV)</summary>
-        <div className="pt-3">
-          <CrossLookupSection
-            leftId={datasetId}
-            leftColumns={data.columns}
-            datasets={allDatasets.data ?? []}
-            onDerived={onOpen}
-          />
-        </div>
-      </details>
-
-      <details className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Juntar com outra tabela (junção)</summary>
-        <div className="pt-3">
-          <JoinSection
-            leftId={datasetId}
-            leftColumns={data.columns}
-            datasets={allDatasets.data ?? []}
-            onDerived={onOpen}
-          />
-        </div>
-      </details>
-
-      <details className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Agrupar e agregar (somas, contagens)</summary>
-        <div className="pt-3">
-          <AggregateSection datasetId={datasetId} columns={data.columns} onDerived={onOpen} />
-        </div>
-      </details>
-
-      <details className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Comparar linhas por chave (avançado)</summary>
-        <div className="pt-3">
-          <KeyCompareSection
-            leftId={datasetId}
-            leftColumns={data.columns}
-            datasets={allDatasets.data ?? []}
-            onDerived={onOpen}
-          />
-        </div>
-      </details>
-
-      <details className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Gerenciar tabela</summary>
-        <div className="pt-3">
-          <TableAdminSection datasetId={datasetId} name={data.name} onDeleted={onDeleted} />
-        </div>
-      </details>
-
-      <details className={sectionClass}>
-        <summary className="cursor-pointer font-medium">Duplicatas e semelhanças</summary>
-        <div className="pt-3">
-          <DuplicatesSection datasetId={datasetId} hasCodeMapping={Boolean(data.mapping.code)} />
-        </div>
-      </details>
+      <Tabs
+        label="Ferramentas da tabela"
+        initial="transformar"
+        tabs={[
+          {
+            id: "transformar",
+            label: "Transformar",
+            content: <ReplaceSection datasetId={datasetId} columns={data.columns} />,
+          },
+          {
+            id: "cruzar",
+            label: "Cruzar tabelas",
+            content: (
+              <Tabs
+                label="Cruzamentos entre tabelas"
+                size="sm"
+                initial="procv"
+                tabs={[
+                  {
+                    id: "procv",
+                    label: "Super-PROCV",
+                    content: (
+                      <CrossLookupSection
+                        leftId={datasetId}
+                        leftColumns={data.columns}
+                        datasets={allDatasets.data ?? []}
+                        onDerived={onOpen}
+                      />
+                    ),
+                  },
+                  {
+                    id: "juncao",
+                    label: "Junção",
+                    content: (
+                      <JoinSection
+                        leftId={datasetId}
+                        leftColumns={data.columns}
+                        datasets={allDatasets.data ?? []}
+                        onDerived={onOpen}
+                      />
+                    ),
+                  },
+                  {
+                    id: "comparar",
+                    label: "Comparar",
+                    content: (
+                      <KeyCompareSection
+                        leftId={datasetId}
+                        leftColumns={data.columns}
+                        datasets={allDatasets.data ?? []}
+                        onDerived={onOpen}
+                      />
+                    ),
+                  },
+                  {
+                    id: "agrupar",
+                    label: "Agrupar",
+                    content: (
+                      <AggregateSection datasetId={datasetId} columns={data.columns} onDerived={onOpen} />
+                    ),
+                  },
+                ]}
+              />
+            ),
+          },
+          {
+            id: "mapeamento",
+            label: "Mapeamento",
+            content: (
+              <div className="space-y-6">
+                <MappingSection
+                  key={datasetId}
+                  datasetId={datasetId}
+                  columns={data.columns}
+                  initial={data.mapping}
+                  onSaved={onSaved}
+                />
+                <HeaderSection datasetId={datasetId} />
+                <TemplatesSection
+                  datasetId={datasetId}
+                  onApplied={() => void queryClient.invalidateQueries({ queryKey: ["dataset", datasetId] })}
+                />
+              </div>
+            ),
+          },
+          {
+            id: "historico",
+            label: "Histórico",
+            content: <HistoryList datasetId={datasetId} />,
+          },
+          {
+            id: "gerenciar",
+            label: "Gerenciar",
+            content: <TableAdminSection datasetId={datasetId} name={data.name} onDeleted={onDeleted} />,
+          },
+          {
+            id: "duplicatas",
+            label: "Duplicatas",
+            content: <DuplicatesSection datasetId={datasetId} hasCodeMapping={Boolean(data.mapping.code)} />,
+          },
+          ...(derived
+            ? [
+                {
+                  id: "rastreabilidade",
+                  label: "Rastreabilidade",
+                  content: <LineagePanel datasetId={datasetId} />,
+                },
+              ]
+            : []),
+        ]}
+      />
     </div>
   );
 }

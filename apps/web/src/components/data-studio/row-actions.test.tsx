@@ -90,9 +90,9 @@ describe("RowActions", () => {
     );
   });
 
-  it("sem seleção, as ações ficam desabilitadas", () => {
+  it("sem seleção, as ações não aparecem (são contextuais e não ocupam a tela)", () => {
     renderActions([]);
-    expect(screen.getByRole("button", { name: "Excluir linhas" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Atualizar valor" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Excluir linhas" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Atualizar valor" })).not.toBeInTheDocument();
   });
 });

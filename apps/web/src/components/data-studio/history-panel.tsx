@@ -39,7 +39,8 @@ export function historyShortcut(event: KeyboardEvent): "undo" | "redo" | null {
   return null;
 }
 
-export function HistoryPanel({ datasetId }: { datasetId: string }) {
+/** Desfazer/refazer com atalho de teclado. Fica na barra de ferramentas, sempre visível. */
+export function UndoRedoControls({ datasetId }: { datasetId: string }) {
   const queryClient = useQueryClient();
   const operations = useQuery({
     queryKey: ["operations", datasetId],
@@ -54,6 +55,7 @@ export function HistoryPanel({ datasetId }: { datasetId: string }) {
 
   const applied = operations.data?.filter((o) => o.status === "applied") ?? [];
   const undone = operations.data?.filter((o) => o.status === "undone") ?? [];
+  const currentNumber = versions.data?.find((v) => v.is_current)?.number;
 
   async function refreshAll() {
     await invalidateDataset(queryClient, datasetId);
@@ -95,41 +97,49 @@ export function HistoryPanel({ datasetId }: { datasetId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId, busy]);
 
-  const currentNumber = versions.data?.find((v) => v.is_current)?.number;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={() => void move("undo")}
+        disabled={busy || applied.length === 0}
+        className={buttonClass}
+      >
+        Desfazer (Ctrl+Z)
+      </button>
+      <button
+        type="button"
+        onClick={() => void move("redo")}
+        disabled={busy || undone.length === 0}
+        className={buttonClass}
+      >
+        Refazer (Ctrl+Y)
+      </button>
+      {currentNumber !== undefined ? (
+        <span className="text-sm text-[var(--color-muted)]">Versão atual: {currentNumber}</span>
+      ) : null}
+      {message ? (
+        <span role="status" className="text-sm text-[var(--color-muted)]">
+          {message}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Lista de operações e versões. Os controles de desfazer ficam na barra de ferramentas. */
+export function HistoryList({ datasetId }: { datasetId: string }) {
+  const operations = useQuery({
+    queryKey: ["operations", datasetId],
+    queryFn: () => listOperations(datasetId),
+  });
+  const versions = useQuery({
+    queryKey: ["versions", datasetId],
+    queryFn: () => listVersions(datasetId),
+  });
 
   return (
-    <section className={sectionClass} aria-labelledby="historico">
-      <h2 id="historico" className="font-medium">
-        Histórico
-      </h2>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void move("undo")}
-          disabled={busy || applied.length === 0}
-          className={buttonClass}
-        >
-          Desfazer (Ctrl+Z)
-        </button>
-        <button
-          type="button"
-          onClick={() => void move("redo")}
-          disabled={busy || undone.length === 0}
-          className={buttonClass}
-        >
-          Refazer (Ctrl+Y)
-        </button>
-        {currentNumber !== undefined ? (
-          <span className="text-sm text-[var(--color-muted)]">Versão atual: {currentNumber}</span>
-        ) : null}
-      </div>
-
-      {message ? (
-        <p role="status" className="text-sm text-[var(--color-muted)]">
-          {message}
-        </p>
-      ) : null}
-
+    <section aria-label="Operações e versões" className="space-y-3">
       {operations.data && operations.data.length === 0 ? (
         <p className="text-sm text-[var(--color-muted)]">Nenhuma operação aplicada ainda.</p>
       ) : null}
@@ -153,6 +163,19 @@ export function HistoryPanel({ datasetId }: { datasetId: string }) {
           Versões de dados mantidas: {versions.data.length}. Nenhuma versão é apagada.
         </p>
       ) : null}
+    </section>
+  );
+}
+
+/** Painel completo (controles + lista), mantido para uso isolado. */
+export function HistoryPanel({ datasetId }: { datasetId: string }) {
+  return (
+    <section className={sectionClass} aria-labelledby="historico">
+      <h2 id="historico" className="font-medium">
+        Histórico
+      </h2>
+      <UndoRedoControls datasetId={datasetId} />
+      <HistoryList datasetId={datasetId} />
     </section>
   );
 }

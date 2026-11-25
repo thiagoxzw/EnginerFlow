@@ -24,18 +24,25 @@ export interface ImportItem {
   inspectError: string | null;
   /** Abas escolhidas (XLSX). Para CSV fica vazio e a importação usa o arquivo inteiro. */
   sheets: string[];
+  /** Abas (ou "" para CSV) já importadas com sucesso. Repetir não as reenvia. */
+  done: string[];
   status: "pendente" | "importando" | "importada" | "já estava importada" | "erro";
   message: string | null;
 }
 
-/** Monta as importações a partir da fila: uma por aba selecionada em XLSX, uma por arquivo em CSV. */
+/**
+ * Monta as importações pendentes: uma por aba selecionada em XLSX, uma por arquivo em CSV.
+ * Itens já importados não entram de novo; repetir a importação só reenvia o que falhou ou ficou pendente.
+ */
 export function planImports(items: ImportItem[]): { key: string; file: File; sheet: string }[] {
   const plan: { key: string; file: File; sheet: string }[] = [];
   for (const item of items) {
     if (item.inspectError || !item.info) continue;
     if (item.info.kind === "xlsx") {
-      for (const sheet of item.sheets) plan.push({ key: item.key, file: item.file, sheet });
-    } else {
+      for (const sheet of item.sheets) {
+        if (!item.done.includes(sheet)) plan.push({ key: item.key, file: item.file, sheet });
+      }
+    } else if (!item.done.includes("")) {
       plan.push({ key: item.key, file: item.file, sheet: "" });
     }
   }
@@ -75,6 +82,7 @@ export function UploadSection({ onImported }: { onImported: (id: string) => void
       info: null,
       inspectError: null,
       sheets: [],
+      done: [],
       status: "pendente",
       message: null,
     }));
@@ -147,6 +155,7 @@ export function UploadSection({ onImported }: { onImported: (id: string) => void
             p.key === step.key
               ? {
                   ...p,
+                  done: [...p.done, step.sheet],
                   status: result.created ? "importada" : "já estava importada",
                   message: result.dataset.name,
                 }
@@ -281,7 +290,7 @@ export function UploadSection({ onImported }: { onImported: (id: string) => void
       ) : null}
 
       <button type="button" onClick={() => void importAll()} disabled={busy || plan.length === 0} className={buttonClass}>
-        {busy ? "Importando…" : `Importar ${plan.length} tabela(s)`}
+        {busy ? "Importando…" : plan.length === 0 ? "Importar" : `Importar ${plan.length} tabela(s)`}
       </button>
 
       {progress ? (

@@ -34,8 +34,9 @@ test.beforeEach(async ({ page }) => {
 test("agregação por unidade: contagem de códigos, prévia exata e tabela derivada", async ({ page }) => {
   // SYN-procv-busca: PC tem 3 linhas (00123 duas vezes, AB1 uma vez); CX tem 1 linha (AB1).
   await importAndOpen(page, "SYN-procv-busca.csv", "SYN-procv-busca");
-  await page.locator("summary", { hasText: "Agrupar e agregar" }).click();
-  const agregacao = page.locator("details", { hasText: "Agrupar e agregar" });
+  await page.getByRole("tab", { name: "Cruzar tabelas" }).click();
+  await page.getByRole("tab", { name: "Agrupar", exact: true }).click();
+  const agregacao = page.getByRole("tabpanel", { name: "Agrupar", exact: true });
 
   await agregacao.getByRole("checkbox", { name: "Unidade" }).check();
   await agregacao.getByRole("button", { name: "Gerar prévia" }).click();

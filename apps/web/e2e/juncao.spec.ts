@@ -34,8 +34,9 @@ test.beforeEach(async ({ page }) => {
 test("junção com chave composta N:M exige confirmação antes de criar a tabela", async ({ page }) => {
   await importAndOpen(page, "SYN-procv-busca.csv", "SYN-procv-busca");
   await importAndOpen(page, "SYN-procv-consulta.csv", "SYN-procv-consulta");
-  await page.locator("summary", { hasText: "Juntar com outra tabela (junção)" }).click();
-  const juncao = page.locator("details", { hasText: "Juntar com outra tabela (junção)" });
+  await page.getByRole("tab", { name: "Cruzar tabelas" }).click();
+  await page.getByRole("tab", { name: "Junção" }).click();
+  const juncao = page.getByRole("tabpanel", { name: "Junção" });
 
   await juncao.locator("#jn-right").selectOption({ label: "SYN-procv-busca" });
   await juncao.locator("#jn-lk-0").selectOption("Código");

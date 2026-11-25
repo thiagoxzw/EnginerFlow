@@ -6,13 +6,22 @@ import { useState } from "react";
 import { KeyPairsEditor, keysComplete, type KeyPair } from "@/components/data-studio/key-pairs";
 import { errorText } from "@/components/data-studio/templates-section";
 import { apiFetch } from "@/lib/api";
-import { derivedNotice, type DatasetSummary } from "@/lib/datasets";
+import { derivedNotice, newIdempotencyKey, type DatasetSummary } from "@/lib/datasets";
 
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm";
 const buttonClass =
   "rounded-md border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-border)] disabled:opacity-50";
 
 const COMPARE_PATH = "/api/v1/crossing/compare";
+
+export type CompareMode = "exato" | "normalizado" | "numerico" | "descricao_tecnica";
+
+export const MODE_LABELS: Record<CompareMode, string> = {
+  exato: "Texto exato",
+  normalizado: "Texto normalizado (caixa, acentos e espaços)",
+  numerico: "Numérico (decimal: 1,50 = 1.5)",
+  descricao_tecnica: "Descrição técnica (caixa e espaços; mantém símbolos)",
+};
 
 export const COUNT_LABELS: Record<string, string> = {
   adicionado: "Adicionados (só na tabela de busca)",
@@ -39,13 +48,37 @@ interface CompareDerived {
   result_sha256: string;
 }
 
-/** Corpo do contrato. */
-export function buildCompareBody(form: { leftId: string; rightId: string; keys: KeyPair[] }) {
+/** Colunas que serão comparadas: mesmo nome nas duas tabelas (sem diferenciar caixa), exceto chaves. */
+export function sharedCompareColumns(
+  leftColumns: string[],
+  rightColumns: string[],
+  leftKeys: string[],
+  rightKeys: string[],
+): string[] {
+  const right = new Set(rightColumns.map((c) => c.toLowerCase()));
+  return leftColumns.filter(
+    (c) => !leftKeys.includes(c) && !rightKeys.some((k) => k.toLowerCase() === c.toLowerCase()) && right.has(c.toLowerCase()),
+  );
+}
+
+/** Corpo do contrato. Envia o modo de TODAS as colunas comparadas (o padrão é explícito). */
+export function buildCompareBody(form: {
+  leftId: string;
+  rightId: string;
+  keys: KeyPair[];
+  shared: string[];
+  modes: Record<string, CompareMode>;
+}) {
+  const modes: Record<string, CompareMode> = {};
+  for (const column of form.shared) {
+    modes[column] = form.modes[column] ?? "exato";
+  }
   return {
     left_id: form.leftId,
     right_id: form.rightId,
     left_keys: form.keys.map((k) => k.left),
     right_keys: form.keys.map((k) => k.right),
+    modes,
   };
 }
 
@@ -64,21 +97,34 @@ export function KeyCompareSection({
   const others = datasets.filter((d) => d.id !== leftId);
   const [rightId, setRightId] = useState("");
   const [keys, setKeys] = useState<KeyPair[]>([{ left: leftColumns[0] ?? "", right: "" }]);
+  const [modes, setModes] = useState<Record<string, CompareMode>>({});
   const [preview, setPreview] = useState<ComparePreview | null>(null);
+  const [idem, setIdem] = useState(newIdempotencyKey);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const right = others.find((d) => d.id === rightId);
   const rightColumns = right?.columns ?? [];
   const ready = Boolean(rightId) && keysComplete(keys);
+  const shared = sharedCompareColumns(
+    leftColumns,
+    rightColumns,
+    keys.map((k) => k.left),
+    keys.map((k) => k.right),
+  );
+
+  function body() {
+    return buildCompareBody({ leftId, rightId, keys, shared, modes });
+  }
 
   async function runPreview() {
     setBusy("preview");
     setMessage(null);
+    setIdem(newIdempotencyKey());
     try {
       const result = await apiFetch<ComparePreview>(`${COMPARE_PATH}/preview`, {
         method: "POST",
-        body: JSON.stringify(buildCompareBody({ leftId, rightId, keys })),
+        body: JSON.stringify(body()),
       });
       setPreview(result);
     } catch (error) {
@@ -93,12 +139,15 @@ export function KeyCompareSection({
     setBusy("derive");
     setMessage(null);
     try {
+      // Mesma chave em nova tentativa: se a resposta se perder, a tabela não é duplicada.
       const result = await apiFetch<CompareDerived>(`${COMPARE_PATH}/derive`, {
         method: "POST",
-        body: JSON.stringify(buildCompareBody({ leftId, rightId, keys })),
+        headers: { "Idempotency-Key": idem },
+        body: JSON.stringify(body()),
       });
       await queryClient.invalidateQueries({ queryKey: ["datasets"] });
       setPreview(null);
+      setIdem(newIdempotencyKey());
       onDerived(result.dataset_id, derivedNotice(result));
     } catch (error) {
       setMessage(errorText(error));
@@ -110,8 +159,9 @@ export function KeyCompareSection({
   return (
     <div className="space-y-4">
       <p className="text-sm text-[var(--color-muted)]">
-        Compara as linhas pelas chaves escolhidas e mostra o que foi adicionado, removido ou alterado coluna a
-        coluna. Colunas com o mesmo nome são comparadas; valores numéricos são comparados como decimais (1,50 = 1.5).
+        Compara as linhas pelas chaves escolhidas e mostra o que foi adicionado, removido ou alterado coluna a coluna.
+        Por padrão, cada coluna é comparada como texto exato: <strong>007 é diferente de 7</strong>. Escolha outro
+        modo por coluna quando fizer sentido.
       </p>
 
       <div className="space-y-1">
@@ -149,6 +199,39 @@ export function KeyCompareSection({
         rightColumns={rightColumns}
         rightEnabled={Boolean(rightId)}
       />
+
+      {rightId && shared.length > 0 ? (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">Modo de comparação por coluna</legend>
+          {shared.map((column) => (
+            <div key={column} className="flex flex-wrap items-center gap-2">
+              <label htmlFor={`cp-mode-${column}`} className="min-w-40 text-sm">
+                {column}
+              </label>
+              <select
+                id={`cp-mode-${column}`}
+                value={modes[column] ?? "exato"}
+                onChange={(e) => {
+                  setModes((prev) => ({ ...prev, [column]: e.target.value as CompareMode }));
+                  setPreview(null);
+                }}
+                className={inputClass}
+              >
+                {(Object.keys(MODE_LABELS) as CompareMode[]).map((m) => (
+                  <option key={m} value={m}>
+                    {MODE_LABELS[m]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </fieldset>
+      ) : null}
+      {rightId && shared.length === 0 ? (
+        <p className="text-sm text-[var(--color-muted)]">
+          Nenhuma coluna de mesmo nome além das chaves: a comparação só classifica adicionados, removidos e idênticos.
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={() => void runPreview()} disabled={!ready || busy !== null} className={buttonClass}>

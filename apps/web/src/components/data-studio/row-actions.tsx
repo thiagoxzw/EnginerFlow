@@ -38,7 +38,7 @@ export function RowActions({
   columns: string[];
   selected: number[];
   scopeLabel: string;
-  onApplied?: () => void;
+  onApplied?: (message: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [column, setColumn] = useState(columns[0] ?? "");
@@ -81,8 +81,9 @@ export function RowActions({
       const done = pending.kind === "delete" ? "Linhas excluídas logicamente." : "Valores atualizados.";
       setPending(null);
       await invalidateDataset(queryClient, datasetId);
-      setMessage(`${done} Desfazer disponível no histórico.`);
-      onApplied?.();
+      const confirmation = `${done} Desfazer disponível no histórico.`;
+      setMessage(confirmation);
+      onApplied?.(confirmation);
     } catch (error) {
       setPending(null);
       setMessage(errorText(error));
@@ -92,6 +93,8 @@ export function RowActions({
   }
 
   const hasSelection = selected.length > 0;
+  // Ações aparecem só com linhas selecionadas (contextuais): sem seleção, não ocupam a tela.
+  if (!hasSelection) return null;
 
   return (
     <section className={sectionClass} aria-labelledby="acoes-linhas">

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { KeyPairsEditor, keysComplete, type KeyPair } from "@/components/data-studio/key-pairs";
 import { errorText } from "@/components/data-studio/templates-section";
 import { apiFetch } from "@/lib/api";
-import { derivedNotice, type DatasetSummary } from "@/lib/datasets";
+import { derivedNotice, newIdempotencyKey, type DatasetSummary } from "@/lib/datasets";
 
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm";
 const buttonClass =
@@ -93,6 +93,8 @@ export function JoinSection({
   const [confirmGrowth, setConfirmGrowth] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Chave da derivação: nasce com a prévia e é reusada numa nova tentativa (sem duplicar).
+  const [idem, setIdem] = useState(newIdempotencyKey);
 
   const right = others.find((d) => d.id === rightId);
   const rightColumns = right?.columns ?? [];
@@ -106,6 +108,7 @@ export function JoinSection({
 
   async function runPreview() {
     setBusy("preview");
+    setIdem(newIdempotencyKey());
     setMessage(null);
     try {
       const result = await apiFetch<JoinPreview>(`${JOIN_PATH}/preview`, {
@@ -128,10 +131,12 @@ export function JoinSection({
     try {
       const result = await apiFetch<JoinDerived>(`${JOIN_PATH}/derive`, {
         method: "POST",
+        headers: { "Idempotency-Key": idem },
         body: JSON.stringify(buildJoinBody({ leftId, rightId, keys, joinType })),
       });
       await queryClient.invalidateQueries({ queryKey: ["datasets"] });
       setPreview(null);
+      setIdem(newIdempotencyKey());
       onDerived(result.dataset_id, derivedNotice(result));
     } catch (error) {
       setMessage(errorText(error));

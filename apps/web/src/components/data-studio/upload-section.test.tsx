@@ -26,6 +26,7 @@ function item(name: string, partial: Partial<ImportItem>): ImportItem {
     info: null,
     inspectError: null,
     sheets: [],
+    done: [],
     status: "pendente",
     message: null,
     ...partial,
@@ -63,6 +64,23 @@ describe("planImports", () => {
       item("ruim.xlsx", { inspectError: "corrompido" }),
     ]);
     expect(plan).toEqual([]);
+  });
+
+  it("repetir a importação reenvia só o que não foi concluído (aba com erro, CSV pendente)", () => {
+    const plan = planImports([
+      item("bom.xlsx", {
+        info: info("xlsx", ["Rev A", "Rev B"]),
+        sheets: ["Rev A", "Rev B"],
+        done: ["Rev A"],
+        status: "erro",
+      }),
+      item("kits.csv", { info: info("csv"), done: [""], status: "importada" }),
+      item("novo.csv", { info: info("csv"), done: [] }),
+    ]);
+    expect(plan.map((p) => [p.key, p.sheet])).toEqual([
+      ["bom.xlsx", "Rev B"],
+      ["novo.csv", ""],
+    ]);
   });
 
   it("não importa XLSX sem nenhuma aba marcada", () => {
