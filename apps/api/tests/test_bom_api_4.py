@@ -69,7 +69,8 @@ def _structure(
         },
     )
     assert resp.status_code == 201, resp.text
-    return resp.json()
+    body: dict[str, Any] = resp.json()
+    return body
 
 
 def _lines(client: TestClient, revision_id: str) -> list[dict[str, Any]]:

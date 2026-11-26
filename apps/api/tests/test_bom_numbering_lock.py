@@ -12,9 +12,11 @@ from __future__ import annotations
 import os
 import threading
 import time
+from collections.abc import Callable
 
 import pytest
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql.psycopg import PGDialect_psycopg
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import sessionmaker
 
 from engiflow_api.application.bom import _next_number, lock_structure_statement
@@ -22,7 +24,8 @@ from engiflow_api.infrastructure import bom_models as m
 
 
 def test_trava_compila_com_for_update() -> None:
-    sql = str(lock_structure_statement("abc").compile(dialect=postgresql.dialect()))
+    new_dialect: Callable[[], Dialect] = PGDialect_psycopg
+    sql = str(lock_structure_statement("abc").compile(dialect=new_dialect()))
     assert "FOR UPDATE" in sql
 
 
@@ -41,12 +44,13 @@ def test_segunda_transacao_espera_o_commit_da_primeira(session_factory: sessionm
     first = factory()
     assert _next_number(first, sid) == 1  # mantém a trava até o commit
 
-    result: dict[str, object] = {}
+    numbers: list[int] = []
+    finished_at: list[float] = []
 
     def second() -> None:
         with factory() as other:
-            result["number"] = _next_number(other, sid)
-            result["at"] = time.monotonic()
+            numbers.append(_next_number(other, sid))
+            finished_at.append(time.monotonic())
 
     worker = threading.Thread(target=second)
     worker.start()
@@ -58,5 +62,5 @@ def test_segunda_transacao_espera_o_commit_da_primeira(session_factory: sessionm
     first.close()
     worker.join(timeout=10)
     assert not worker.is_alive()
-    assert result["at"] >= committed_at  # só retornou após o commit
-    assert result["number"] == 1  # sem revisões criadas, o próximo número ainda é 1
+    assert finished_at[0] >= committed_at  # só retornou após o commit
+    assert numbers == [1]  # sem revisões criadas, o próximo número ainda é 1

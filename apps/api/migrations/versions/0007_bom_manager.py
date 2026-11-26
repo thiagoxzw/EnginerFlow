@@ -28,7 +28,9 @@ def upgrade() -> None:
         sa.Column("name", sa.String(160), nullable=False, unique=True),
         sa.Column("description", sa.String(1000), nullable=False, server_default=""),
         sa.Column("current_revision_id", sa.String(36), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_table(
@@ -50,7 +52,9 @@ def upgrade() -> None:
         sa.Column("line_count", sa.Integer, nullable=False),
         sa.Column("content_sha256", sa.String(64), nullable=False),
         sa.Column("actor", sa.String(120), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.UniqueConstraint("structure_id", "number", name="uq_bom_revisions_number"),
     )
     op.create_index("ix_bom_revisions_structure_id", "bom_revisions", ["structure_id"])
@@ -93,7 +97,9 @@ def upgrade() -> None:
         ),
         sa.Column("name", sa.String(160), nullable=False),
         sa.Column("parts", sa.JSON, nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
     op.create_index("ix_bom_kits_structure_id", "bom_kits", ["structure_id"])
 
