@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { errorText } from "@/components/data-studio/templates-section";
 import { getLineage, type Lineage } from "@/lib/datasets";
 
-const sectionClass = "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3";
+const sectionClass = "card p-4 space-y-3";
 
 /** Rastreabilidade de uma tabela derivada: operação, execução, parâmetros, origens e hash. */
 export function LineagePanel({ datasetId }: { datasetId: string }) {

@@ -8,7 +8,7 @@ import { apiFetch } from "@/lib/api";
 import type { DatasetSummary } from "@/lib/datasets";
 
 const sectionClass =
-  "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3";
+  "card p-4 space-y-3";
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2";
 const buttonClass =
   "rounded-md border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-border)] disabled:opacity-50";

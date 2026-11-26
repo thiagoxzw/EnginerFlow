@@ -277,12 +277,16 @@ export function DataTable({ datasetId, columns }: { datasetId: string; columns: 
   // Descarta o estado ligado à versão anterior (ajuste de estado durante a renderização, sem efeito).
   if (seenVersion !== versionId) {
     setSeenVersion(versionId);
-    setSelected(new Set());
-    setScope("manual");
-    setSelection(null);
-    setPendingClear(null);
-    setPendingAction(null);
-    setMenu(null);
+    // Só descarta quando já havia uma versão conhecida. A primeira resolução (null -> id) não apaga
+    // o menu ou a seleção que o usuário acabou de abrir.
+    if (seenVersion !== null) {
+      setSelected(new Set());
+      setScope("manual");
+      setSelection(null);
+      setPendingClear(null);
+      setPendingAction(null);
+      setMenu(null);
+    }
   }
 
   function pointer(rowIndex: number, colIndex: number, shift: boolean) {

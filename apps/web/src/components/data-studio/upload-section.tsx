@@ -5,7 +5,7 @@ import { useState, type DragEvent } from "react";
 import { errorText } from "@/components/data-studio/templates-section";
 import { inspectUpload, uploadDataset, type InspectOut } from "@/lib/datasets";
 
-const sectionClass = "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3";
+const sectionClass = "card p-4 space-y-3";
 const buttonClass =
   "rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-white disabled:opacity-60";
 const secondaryButton = "rounded-md border border-[var(--color-border)] px-3 py-1 text-sm disabled:opacity-50";

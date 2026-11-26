@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -50,7 +50,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Erro desconhecido.";
 }
 
-const sectionClass = "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3";
+const sectionClass = "card p-4 space-y-3";
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2";
 const buttonClass =
   "rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-white disabled:opacity-60";
