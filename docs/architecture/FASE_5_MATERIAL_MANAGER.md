@@ -112,3 +112,17 @@ resultado automático de similaridade.
 - Implementação de qualquer módulo.
 - Conexão direta com Protheus ou Solid Edge.
 - Atribuição automática de código industrial.
+
+## Critérios de aceite para a fase de implementação
+
+- Toda correspondência exibida tem classe de evidência e as evidências que a justificam.
+- Nenhum código oficial é atribuído sem decisão humana registrada.
+- Uma mesma importação, com o mesmo hash e a mesma versão do normalizador, gera o mesmo resultado.
+- Testes e exemplos usam somente dados sintéticos. A suíte E2E roda isolada, no mesmo padrão do BOM Manager.
+
+## Pontos em aberto (decidir antes da implementação)
+
+- Quem pode confirmar uma decisão, e se a confirmação exige dupla aprovação.
+- Limiares de similaridade para as classes Provável e Ambígua, a calibrar com dados sintéticos.
+- Campos mínimos de cadastro de cada fonte (Totus, Protheus e planilha).
+- Quem aprova uma relação de equivalentes e a faixa de atributos aceita.
