@@ -230,7 +230,7 @@ export interface KitPartIn {
 
 export interface KitImportPreview {
   parts: { code: string; qty: string; unit: string | null; description: string | null }[];
-  issues: { severity: "erro" | "alerta" | "informação"; row: number; code?: string; message: string }[];
+  issues: { severity: "erro" | "alerta" | "informação"; row: number | null; code?: string; message: string }[];
   row_count: number;
 }
 

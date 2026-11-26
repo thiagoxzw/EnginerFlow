@@ -120,7 +120,9 @@ def hierarchy_sheet(db: DbSession, revision_id: str, root: str) -> Sheet:
             )
             if len(rows) > MAX_HIERARCHY_ROWS:
                 raise DomainError(
-                    "A hierarquia excede o limite de exportação. Exporte por conjunto."
+                    f"A hierarquia de '{root}' excede {MAX_HIERARCHY_ROWS} linhas (subconjuntos "
+                    "compartilhados geram muitos caminhos). "
+                    "Exporte um conjunto de nível mais baixo."
                 )
             walk(line.child or "", total, depth + 1)
 

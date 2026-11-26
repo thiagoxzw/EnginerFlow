@@ -390,7 +390,7 @@ def test_kit_importado_com_erro_nao_e_criado(
     assert all(k["name"] != "Kit ruim" for k in listed)
 
 
-def test_kit_com_subconjunto_conta_componentes_e_nao_o_proprio_conjunto(
+def test_kit_com_subconjunto_inclui_o_conjunto_e_seus_componentes(
     logged_client: TestClient, storage_settings: Settings
 ) -> None:
     created = _structure(logged_client)
@@ -400,7 +400,7 @@ def test_kit_com_subconjunto_conta_componentes_e_nao_o_proprio_conjunto(
         json={"parts": [{"code": "CONJ-SYN-TRAC", "qty": "1"}], "vehicles": "1", "lot": "1"},
     ).json()
     codes = {m["code"] for m in calc["materials"]}
-    assert "CONJ-SYN-TRAC" not in codes
+    assert "CONJ-SYN-TRAC" in codes  # mesma definição da explosão: o conjunto também é material
     assert "COMP-SYN-MOT" in codes
 
 

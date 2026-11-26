@@ -96,7 +96,7 @@ Atualizado em 2026-11-25. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN
 
 - **Duplicação completa de subconjunto:** copia o conjunto com todos os descendentes. Subconjuntos internos recebem código provisório `-CP`. Em duplicação sucessiva, a colisão vira `-CP2`, `-CP3`… Componentes folha mantêm o código. Código informado pelo usuário que já existe é recusado. A diferença para "só filhos diretos" está na interface.
 - **Códigos provisórios:** `-CP` identifica código gerado por duplicação, que **não é código oficial do ERP**. A validação informa cada um, a árvore os marca como "provisório", e o contrato documenta que consumidores devem tratá-los assim até confirmação.
-- **Kits:** peça folha entra por si, com unidade informada ou a da linha. Subconjunto conta pelos componentes. Importação de tabela (CSV ou XLSX) com prévia. Mesmo código em unidades diferentes gera peças separadas, com aviso, e nunca é somado. Código fora da estrutura bloqueia a criação.
+- **Kits:** peça folha entra por si, com unidade informada ou a da linha. Subconjunto entra como material junto com os componentes dele, como na explosão. Importação de tabela (CSV ou XLSX) com prévia. Mesmo código em unidades diferentes gera peças separadas, com aviso, e nunca é somado. Código fora da estrutura bloqueia a criação.
 - **Limite visual de 1.500 linhas:** é só de exibição. "Mostrar mais" libera o restante, e busca, filtros, cálculos e exportações usam sempre todas as linhas.
 - **Contratos internos:** `docs/architecture/CONTRATOS_BOM.md` e `bom_contracts.py`, com teste de conformidade contra as respostas reais da API.
 - **Desempenho:** `docs/operations/BOM_DESEMPENHO_4.md`, para 1 mil, 5 mil e 10 mil componentes.
@@ -107,3 +107,5 @@ Atualizado em 2026-11-25. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN
 - A busca leva cerca de 300 ms com 10 mil componentes e roda a cada tecla (sem adiamento).
 - Não há virtualização da árvore; a exibição é paginada.
 - Não há contratos de Material Manager, Solid Edge, Inventory ou ERP Connect implementados — só arquitetura da Fase 5, em branch separado.
+
+**Limite da exportação hierárquica:** 200 mil linhas. Como a hierarquia expande cada caminho, estruturas com subconjuntos muito compartilhados podem atingir o limite. Escolha um conjunto de nível mais baixo como topo da exportação.

@@ -232,6 +232,10 @@ def _digest(lines: list[BomLine]) -> str:
 
 
 def _next_number(db: DbSession, structure_id: str) -> int:
+    # Trava a linha da estrutura até o commit: duas edições simultâneas não recebem o mesmo número.
+    db.execute(
+        select(m.BomStructure.id).where(m.BomStructure.id == structure_id).with_for_update()
+    ).first()
     value = db.scalar(
         select(func.coalesce(func.max(m.BomRevision.number), 0)).where(
             m.BomRevision.structure_id == structure_id
@@ -792,7 +796,7 @@ def kit_rows_from_dataset(
             issues.append(
                 {
                     "severity": "informação",
-                    "row": 0,
+                    "row": None,
                     "code": code_value,
                     "message": _units_message(code_value, units),
                 }

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Literal
@@ -96,30 +97,37 @@ def defined_codes(lines: list[BomLine]) -> set[str]:
 
 
 def find_cycles(lines: list[BomLine]) -> list[list[str]]:
-    """Ciclos no grafo pai -> filho. Cada ciclo é a sequência de códigos que se repete."""
+    """Ciclos no grafo pai -> filho. Cada ciclo é a sequência de códigos que se repete.
+
+    Usa pilha explícita (não recursão): estruturas muito profundas não estouram o limite do Python.
+    """
     index = _children_index(lines)
     state: dict[str, int] = {}  # 1 = em exploração, 2 = concluído
-    stack: list[str] = []
     cycles: list[list[str]] = []
-
-    def visit(code: str) -> None:
-        state[code] = 1
-        stack.append(code)
-        for line in index.get(code, []):
-            child = line.child or ""
-            if state.get(child) == 1:
-                start = stack.index(child)
-                cycle = [*stack[start:], child]
-                if cycle not in cycles:
-                    cycles.append(cycle)
-            elif child not in state:
-                visit(child)
-        stack.pop()
-        state[code] = 2
-
-    for code in list(index):
-        if code not in state:
-            visit(code)
+    for root in list(index):
+        if root in state:
+            continue
+        path: list[str] = [root]
+        iters: list[Iterator[BomLine]] = [iter(index.get(root, []))]
+        state[root] = 1
+        while path:
+            advanced = False
+            for line in iters[-1]:
+                child = line.child or ""
+                if state.get(child) == 1:
+                    start = path.index(child)
+                    cycle = [*path[start:], child]
+                    if cycle not in cycles:
+                        cycles.append(cycle)
+                elif child not in state:
+                    state[child] = 1
+                    path.append(child)
+                    iters.append(iter(index.get(child, [])))
+                    advanced = True
+                    break
+            if not advanced:
+                state[path.pop()] = 2
+                iters.pop()
     return cycles
 
 
@@ -737,7 +745,7 @@ def duplicate_subtree(
 
 @dataclass(frozen=True)
 class KitPart:
-    """Peça de um kit: subconjunto (conta pelos componentes) ou componente folha (conta por ele)."""
+    """Peça de kit: subconjunto (entra com seus componentes) ou folha (entra por si)."""
 
     code: str
     qty: Decimal
@@ -752,7 +760,7 @@ def kit_requirements_for_parts(
 ) -> dict[tuple[str, str], Decimal]:
     """Materiais do kit para vehicles x lot kits.
 
-    - Peça com filhos: entram os componentes dela (o próprio conjunto não é material).
+    - Peça com filhos: entram o conjunto e os componentes dele (como na explosão).
     - Componente folha: entra pela quantidade e unidade informadas (ou a unidade da linha).
     """
     if vehicles <= 0 or lot <= 0:
@@ -773,6 +781,8 @@ def kit_requirements_for_parts(
             qty, _ = _requirements(index, part.code, memo)
             for key, value in qty.items():
                 total[key] += value * part.qty
+            # Mesma definição da explosão: o subconjunto também é um item de material.
+            total[(part.code, _line_unit(lines, part.code))] += part.qty
         else:
             unit = unit_key(part.unit) if part.unit else _line_unit(lines, part.code)
             total[(part.code, unit)] += part.qty

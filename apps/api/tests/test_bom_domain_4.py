@@ -279,3 +279,13 @@ def test_duplicacao_sucessiva_resolve_colisao_com_codigos_provisorios_unicos() -
         assert "já existe" in str(exc)
     else:
         raise AssertionError("código informado existente deveria ser recusado")
+
+
+def test_detecta_ciclo_em_cadeia_muito_profunda_sem_recursao() -> None:
+    depth = 3000
+    lines = [L(1, None, "N0-SYN")]
+    lines += [L(i + 1, f"N{i - 1}-SYN", f"N{i}-SYN") for i in range(1, depth)]
+    assert find_cycles(lines) == []
+    lines.append(L(depth + 1, f"N{depth - 1}-SYN", "N0-SYN"))
+    cycles = find_cycles(lines)
+    assert cycles and cycles[0][0] == cycles[0][-1]

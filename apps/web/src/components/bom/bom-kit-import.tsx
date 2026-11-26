@@ -49,7 +49,7 @@ export function KitDraft({
     <section className="space-y-2 rounded-md border border-[var(--color-border)] p-3 text-sm">
       <h3 className="font-medium">Rascunho com seleção da árvore</h3>
       <p className="text-xs text-[var(--color-muted)]">
-        Na aba Estrutura, use “+ kit” em cada linha. Subconjuntos contam pelos componentes; componentes folha contam por si.
+        Na aba Estrutura, use “+ kit” em cada linha. Subconjuntos entram com os componentes deles, como na explosão; componentes folha entram por si.
       </p>
       {draft.length === 0 ? <p className="text-xs text-[var(--color-muted)]">Nenhuma peça selecionada.</p> : null}
       <ul className="space-y-1">
@@ -157,7 +157,7 @@ export function KitFromTable({ structureId, onSaved }: { structureId: string; on
           <ul className="max-h-40 space-y-1 overflow-auto text-xs">
             {preview.issues.map((i, idx) => (
               <li key={idx} className={i.severity === "erro" ? "text-[var(--color-danger)]" : "text-[var(--color-muted)]"}>
-                linha {i.row} · {i.severity}: {i.message}
+                {i.row !== null ? `linha ${i.row} · ` : ""}{i.severity}: {i.message}
               </li>
             ))}
           </ul>
