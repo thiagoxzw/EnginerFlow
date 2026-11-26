@@ -9,6 +9,7 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from engiflow_api.core.config import Settings
@@ -438,7 +439,8 @@ def test_kit_com_mesmo_codigo_em_unidades_diferentes_nao_e_somado(
     ).json()
     unidades = {p["unit"] for p in preview["parts"] if p["code"] == "PARAF-SYN-M8"}
     assert unidades == {"UN", "KG"}  # duas peças, nenhuma soma entre unidades
-    assert any("unidades diferentes" in i["message"] for i in preview["issues"])
+    aviso = next(i for i in preview["issues"] if "unidades diferentes" in i["message"])
+    assert aviso["row"] is None  # sem linha inexistente (antes exibia "linha 0")
     kit = logged_client.post(
         f"/api/v1/bom/structures/{sid}/kits/import",
         json={"name": "Kit unidades", "dataset_id": ds["id"], "mapping": mapping},
@@ -451,3 +453,20 @@ def test_kit_com_mesmo_codigo_em_unidades_diferentes_nao_e_somado(
     materiais = {(m["code"], m["unit"]): Decimal(m["qty"]) for m in calc["materials"]}
     assert materiais[("PARAF-SYN-M8", "UN")] == Decimal(2)
     assert materiais[("PARAF-SYN-M8", "KG")] == Decimal(3)
+
+
+def test_exportacao_hierarquica_acima_do_limite_recusa_com_mensagem(
+    logged_client: TestClient, storage_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engiflow_api.application import bom_export as bx
+
+    monkeypatch.setattr(bx, "MAX_HIERARCHY_ROWS", 1)
+    created = _structure(logged_client)
+    rid = created["revision_id"]
+    resp = logged_client.get(
+        f"/api/v1/bom/revisions/{rid}/export",
+        params={"kind": "hierarchy", "fmt": "csv", "root": "ONIBUS-SYN-EV"},
+    )
+    assert resp.status_code == 422
+    assert "excede 1 linhas" in resp.json()["detail"]
+    assert "conjunto de nível mais baixo" in resp.json()["detail"]

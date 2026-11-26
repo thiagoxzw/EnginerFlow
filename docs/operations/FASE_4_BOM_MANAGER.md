@@ -1,6 +1,6 @@
 # Fase 4 — BOM Manager (status de entrega)
 
-Atualizado em 2026-11-25. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN`). Nenhum dado real.
+Atualizado em 2026-11-26. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN`). Nenhum dado real.
 
 ## Entregue
 
@@ -60,14 +60,19 @@ Atualizado em 2026-11-25. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN
 
 ## Testes
 
-- Domínio: `tests/test_bom_domain_4.py` (16), incluindo o exemplo do pedido: 2 conjuntos A, 4
-  componentes B por A, 8 por veículo e 80 para 10 veículos.
-- API: `tests/test_bom_api_4.py` (12): importação, prévia, zero à esquerda, explosão, edição com
-  nova revisão e desfazer, ciclo recusado, comparação, validação, cruzamento, kits e exportações.
-- Interface (unitários): `lib/bom-tree.test.ts` (decimal exato, árvore, busca, filtros) e
-  `components/bom/bom-import.test.ts` (sugestão de mapeamento).
-- E2E: `e2e/bom.spec.ts` (4 testes): importação com cálculo de explosão, edição com desfazer,
-  validação de erro e cálculo de kit.
+- Domínio: `tests/test_bom_domain_4.py` (19), incluindo o exemplo do pedido: 2 conjuntos A, 4
+  componentes B por A, 8 por veículo e 80 para 10 veículos, e ciclo em cadeia de 3000 níveis.
+- API: `tests/test_bom_api_4.py` (19): importação, prévia, zero à esquerda, explosão, edição com
+  nova revisão e desfazer, ciclo recusado, comparação, validação, cruzamento, kits (com subconjunto
+  e com unidades diferentes), duplicação, exportações e recusa da hierarquia acima do limite.
+- Contratos: `tests/test_bom_contracts_4.py` (3), conformidade com as respostas reais da API.
+- Interface (unitários): `lib/bom-tree.test.ts` (decimal exato, árvore, busca, filtros),
+  `components/bom/bom-import.test.ts` (sugestão de mapeamento) e `lib/bom-export.test.ts`
+  (mensagem de recusa da exportação).
+- E2E: `e2e/bom.spec.ts` (5 testes): importação com cálculo de explosão, edição com desfazer,
+  validação de erro, kit com seleção exata e duplicação completa.
+- Sem teste automatizado: a trava de numeração de revisão sob edições concorrentes (exige
+  PostgreSQL com duas conexões) e a troca de estrutura com linhas antigas na árvore.
 
 ## Limitações conhecidas
 
@@ -80,15 +85,15 @@ Atualizado em 2026-11-25. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN
 - A árvore renderiza até 1500 linhas visíveis. Não há virtualização; a busca e a expansão controlam o volume.
 - Exportação hierárquica limitada a 200 mil linhas.
 - Sem conexão direta com Protheus ou Solid Edge, conforme o escopo. Sem movimentação de estoque.
-- Não houve benchmark dedicado do BOM com milhares de componentes. O cálculo é memorizado por conjunto,
-  mas o desempenho com estruturas grandes ainda não foi medido.
+- Desempenho medido para 1 mil, 5 mil e 10 mil componentes em `docs/operations/BOM_DESEMPENHO_4.md`.
+  O cálculo é memorizado por conjunto.
 - Capturas de tela: uma captura da página no demonstrativo, com "Carregando…" na lista. Não há
   conjunto de capturas por seção nesta entrega.
 
 ## Próximas melhorias (não críticas)
 
 - Desfazer por operação dentro da revisão.
-- Virtualização da árvore e medição de desempenho com milhares de linhas.
+- Virtualização da árvore. A medição de desempenho já foi feita (ver `BOM_DESEMPENHO_4.md`).
 - Importação de listas de kits na interface e seleção manual de componentes.
 - Contratos de integração para Material Manager, Solid Edge Connect, Inventory Manager e ERP Connect: não preparados nesta entrega (o pedido previa apenas contratos, sem implementação).
 
@@ -108,4 +113,4 @@ Atualizado em 2026-11-25. Dados de exemplo sintéticos (prefixo `SYN-`, `BOM-SYN
 - Não há virtualização da árvore; a exibição é paginada.
 - Não há contratos de Material Manager, Solid Edge, Inventory ou ERP Connect implementados — só arquitetura da Fase 5, em branch separado.
 
-**Limite da exportação hierárquica:** 200 mil linhas. Como a hierarquia expande cada caminho, estruturas com subconjuntos muito compartilhados podem atingir o limite. Escolha um conjunto de nível mais baixo como topo da exportação.
+**Limite da exportação hierárquica:** 200 mil linhas. Como a hierarquia expande cada caminho, estruturas com subconjuntos muito compartilhados podem atingir o limite. Escolha um conjunto de nível mais baixo como topo da exportação. A recusa aparece na tela do BOM, na seção de explosão, com a mensagem do servidor.

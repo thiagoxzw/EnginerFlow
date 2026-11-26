@@ -221,6 +221,32 @@ export function bomExportUrl(revisionId: string, params: Record<string, string>)
   return `/api/v1/bom/revisions/${revisionId}/export?${query}`;
 }
 
+/** Baixa uma exportação do BOM com a sessão do usuário. Recusas da API viram erro com a mensagem do servidor. */
+export async function downloadBomExport(revisionId: string, params: Record<string, string>): Promise<void> {
+  const response = await fetch(bomExportUrl(revisionId, params), { credentials: "same-origin" });
+  if (!response.ok) {
+    let detail: string | null = null;
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      detail = typeof body.detail === "string" ? body.detail : null;
+    } catch {
+      detail = null;
+    }
+    throw new Error(detail ?? `Exportação falhou (HTTP ${response.status}).`);
+  }
+  const blob = await response.blob();
+  const match = /filename="([^"]+)"/i.exec(response.headers.get("Content-Disposition") ?? "");
+  const name = match?.[1] ?? `bom.${params.fmt ?? "xlsx"}`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export interface KitPartIn {
   code: string;
   qty: string;

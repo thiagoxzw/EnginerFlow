@@ -34,6 +34,9 @@ Solid Edge Connect, Inventory Manager, ERP Connect). Eles não expõem as tabela
 - Uma revisão nunca muda depois de criada. Consumidores podem guardar `revision_id` com segurança.
 - `content_sha256` identifica o conteúdo de uma revisão.
 - Os cálculos (explosão, kits, comparação) são feitos sobre todas as linhas da revisão. O limite visual da interface não afeta esses resultados.
+- Avisos de kit sem linha da tabela (ex.: mesmo código em unidades diferentes) trazem `row: null`. Consumidores não devem exibir número de linha nesses casos.
+- Exportação recusada (ex.: hierarquia acima de 200 mil linhas) responde `422` no formato de problema, com `detail` em texto. A interface mostra esse `detail` ao usuário.
+- Código de peça provisória (`-CP`, `-CP2`…) não é código oficial do ERP. Consumidores devem tratá-lo como provisório até confirmação.
 
 ## Fora deste contrato (ainda)
 

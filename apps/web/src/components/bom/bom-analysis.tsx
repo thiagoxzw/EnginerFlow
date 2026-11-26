@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import {
-  bomExportUrl,
   compareBom,
+  downloadBomExport,
   createBomKit,
   crossBom,
   explodeBom,
@@ -27,7 +27,15 @@ import { topLines } from "@/lib/bom-tree";
 
 const inputClass = "rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm";
 const buttonClass = "rounded-md border border-[var(--color-border)] px-3 py-1 text-sm disabled:opacity-50";
-const linkClass = "rounded-md border border-[var(--color-border)] px-3 py-1 text-sm";
+/** Baixa uma exportação do BOM; a recusa da API (ex.: limite da hierarquia) aparece na tela. */
+async function exportBom(revisionId: string, params: Record<string, string>, onError: (text: string | null) => void) {
+  onError(null);
+  try {
+    await downloadBomExport(revisionId, params);
+  } catch (error) {
+    onError(errorText(error));
+  }
+}
 
 function Table({ caption, headers, rows }: { caption: string; headers: string[]; rows: (string | number | null)[][] }) {
   return (
@@ -102,12 +110,12 @@ export function ExplodeTab({ revisionId, lines }: { revisionId: string; lines: B
         </button>
         {root ? (
           <>
-            <a className={linkClass} href={bomExportUrl(revisionId, { kind: "consolidated", fmt: "xlsx", root, vehicles })}>
+            <button type="button" className={buttonClass} onClick={() => void exportBom(revisionId, { kind: "consolidated", fmt: "xlsx", root, vehicles }, setMessage)}>
               Exportar consolidada (XLSX)
-            </a>
-            <a className={linkClass} href={bomExportUrl(revisionId, { kind: "hierarchy", fmt: "xlsx", root })}>
+            </button>
+            <button type="button" className={buttonClass} onClick={() => void exportBom(revisionId, { kind: "hierarchy", fmt: "xlsx", root }, setMessage)}>
               Exportar hierárquica (XLSX)
-            </a>
+            </button>
           </>
         ) : null}
       </div>
@@ -171,9 +179,9 @@ export function CompareTab({ structure }: { structure: BomStructure }) {
           Comparar
         </button>
         {a && b ? (
-          <a className={linkClass} href={bomExportUrl(a, { kind: "compare", fmt: "xlsx", other_revision: b })}>
+          <button type="button" className={buttonClass} onClick={() => void exportBom(a, { kind: "compare", fmt: "xlsx", other_revision: b }, setMessage)}>
             Exportar comparação (XLSX)
-          </a>
+          </button>
         ) : null}
       </div>
       {message ? <p role="alert" className="text-sm text-[var(--color-danger)]">{message}</p> : null}
@@ -234,9 +242,9 @@ export function ValidateTab({
             Erros: {counts.erro ?? 0} · Alertas: {counts.alerta ?? 0} · Informações: {counts["informação"] ?? 0}
           </span>
         ) : null}
-        <a className={linkClass} href={bomExportUrl(revisionId, { kind: "issues", fmt: "xlsx", mode })}>
+        <button type="button" className={buttonClass} onClick={() => void exportBom(revisionId, { kind: "issues", fmt: "xlsx", mode }, setMessage)}>
           Exportar inconsistências (XLSX)
-        </a>
+        </button>
       </div>
       <p className="text-xs text-[var(--color-muted)]">
         O painel aponta os problemas e não altera dados. Use “Ir à linha” para localizar o componente.
