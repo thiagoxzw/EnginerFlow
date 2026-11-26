@@ -30,12 +30,15 @@ export function TreeView({
   revisionId,
   lines,
   onNewRevision,
+  loading = false,
   onPickPart,
   focusLine = null,
 }: {
   revisionId: string;
   lines: BomLine[];
   onNewRevision: (revisionId: string) => void;
+  /** Revisão nova ainda carregando: edições ficam desabilitadas para não usar linhas defasadas. */
+  loading?: boolean;
   /** Adiciona um componente ao rascunho de kit (seleção direta pela árvore). */
   onPickPart?: (part: { code: string; unit: string | null; description: string | null }) => void;
   /** Linha indicada pela validação: vem selecionada, com o caminho até ela expandido. */
@@ -203,6 +206,7 @@ export function TreeView({
             revisionId={revisionId}
             onSelect={setSelectedKey}
             onNewRevision={onNewRevision}
+            disabled={loading}
             definedCodes={[...new Set(lines.map((l) => l.child).filter((c): c is string => Boolean(c)))].sort()}
           />
         ) : (
@@ -286,6 +290,7 @@ function Details({
   onSelect,
   onNewRevision,
   definedCodes,
+  disabled = false,
 }: {
   line: BomLine;
   lines: BomLine[];
@@ -294,7 +299,10 @@ function Details({
   revisionId: string;
   onSelect: (key: string) => void;
   onNewRevision: (revisionId: string) => void;
+  /** Revisão nova ainda carregando: edições ficam desabilitadas para não usar linhas defasadas. */
+  loading?: boolean;
   definedCodes: string[];
+  disabled?: boolean;
 }) {
   const [qty, setQty] = useState(line.qty ?? "");
   const [description, setDescription] = useState(line.description ?? "");
@@ -374,7 +382,7 @@ function Details({
         </ul>
       </div>
 
-      <fieldset className="space-y-2 border-t border-[var(--color-border)] pt-3 text-xs" disabled={busy}>
+      <fieldset className="space-y-2 border-t border-[var(--color-border)] pt-3 text-xs" disabled={busy || disabled}>
         <legend className="font-medium">Editar (cria nova revisão; a anterior permanece)</legend>
         <div className="flex gap-2">
           <input aria-label="Nova quantidade" value={qty} onChange={(e) => setQty(e.target.value)} className={`${inputClass} w-24`} />

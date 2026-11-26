@@ -48,11 +48,13 @@ export function BomView() {
   const structure: BomStructure | undefined = structures.data?.find((s) => s.id === storedId) ?? structures.data?.[0];
   const revisionId = workingRevision ?? structure?.current_revision_id ?? null;
   const lines = useQuery({
-    queryKey: ["bom-lines", revisionId],
+    queryKey: ["bom-lines", structure?.id ?? null, revisionId],
     queryFn: () => getBomLines(revisionId as string),
     enabled: Boolean(revisionId),
-    // Mantém a árvore montada enquanto a nova revisão carrega (senão o painel perde o estado).
-    placeholderData: (previous) => previous,
+    // Mantém a árvore montada só dentro da MESMA estrutura (sem linhas de outra estrutura). As
+    // edições ficam desabilitadas enquanto a revisão nova carrega (ver TreeView.loading).
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === (structure?.id ?? null) ? previous : undefined,
   });
   const data = lines.data?.lines ?? [];
   const current = structure?.revisions.find((r) => r.id === revisionId);
@@ -178,6 +180,7 @@ export function BomView() {
                     revisionId={revisionId}
                     lines={data}
                     focusLine={focusLine}
+                    loading={lines.isFetching}
                     onNewRevision={(id) => { setWorkingRevision(id); void refresh(); }}
                     onPickPart={(part) =>
                       setKitDraft((prev) => [...prev, { code: part.code, qty: "1", unit: part.unit, description: part.description }])
