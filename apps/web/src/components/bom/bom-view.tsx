@@ -9,6 +9,7 @@ import { ImportAssistant } from "@/components/bom/bom-import";
 import { KitDraft, KitFromTable, type DraftPart } from "@/components/bom/bom-kit-import";
 import { TreeView } from "@/components/bom/bom-tree-view";
 import { getBomLines, listBomStructures, setBomCurrent, type BomStructure } from "@/lib/bom";
+import { keepPreviousLines } from "@/lib/bom-cache";
 import { topLines } from "@/lib/bom-tree";
 import { usePersistedString } from "@/lib/persist";
 import { errorText } from "@/components/data-studio/templates-section";
@@ -54,7 +55,7 @@ export function BomView() {
     // Mantém a árvore montada só dentro da MESMA estrutura (sem linhas de outra estrutura). As
     // edições ficam desabilitadas enquanto a revisão nova carrega (ver TreeView.loading).
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === (structure?.id ?? null) ? previous : undefined,
+      keepPreviousLines(previous, previousQuery?.queryKey, structure?.id ?? null),
   });
   const data = lines.data?.lines ?? [];
   const current = structure?.revisions.find((r) => r.id === revisionId);

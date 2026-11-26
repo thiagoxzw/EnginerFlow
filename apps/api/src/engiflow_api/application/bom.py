@@ -13,7 +13,7 @@ from dataclasses import asdict
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session as DbSession
 
 from engiflow_api.domain.bom import (
@@ -231,11 +231,14 @@ def _digest(lines: list[BomLine]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def lock_structure_statement(structure_id: str) -> Select[str]:
+    """Consulta que trava a linha da estrutura até o commit (FOR UPDATE no PostgreSQL)."""
+    return select(m.BomStructure.id).where(m.BomStructure.id == structure_id).with_for_update()
+
+
 def _next_number(db: DbSession, structure_id: str) -> int:
-    # Trava a linha da estrutura até o commit: duas edições simultâneas não recebem o mesmo número.
-    db.execute(
-        select(m.BomStructure.id).where(m.BomStructure.id == structure_id).with_for_update()
-    ).first()
+    # Duas edições simultâneas não recebem o mesmo número: a segunda espera o commit da primeira.
+    db.execute(lock_structure_statement(structure_id)).first()
     value = db.scalar(
         select(func.coalesce(func.max(m.BomRevision.number), 0)).where(
             m.BomRevision.structure_id == structure_id
