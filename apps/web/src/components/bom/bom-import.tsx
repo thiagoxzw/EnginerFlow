@@ -121,7 +121,7 @@ export function ImportAssistant({ onCreated }: { onCreated: (structureId: string
   const errors = preview?.issue_counts.erro ?? 0;
 
   return (
-    <section aria-labelledby="bom-import" className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <section aria-labelledby="bom-import" className="space-y-3 card p-4">
       <h2 id="bom-import" className="font-medium">Importar estrutura</h2>
       <p className="text-xs text-[var(--color-muted)]">
         Use uma tabela do Data Studio (CSV ou XLSX, de ERP ou CAD). Nada é gravado antes da confirmação.

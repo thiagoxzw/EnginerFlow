@@ -50,10 +50,10 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
     <form
       onSubmit={handleSubmit(onSubmit)}
       noValidate
-      className="w-full max-w-sm space-y-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6"
+      className="card w-full space-y-5 p-6"
       aria-describedby={serverError ? "login-error" : undefined}
     >
-      <h1 className="text-xl font-semibold">Entrar no EngiFlow</h1>
+      <h1 className="text-lg font-semibold">Entrar no EngiFlow</h1>
 
       <div className="space-y-1">
         <label htmlFor="email" className="block text-sm font-medium">
@@ -65,7 +65,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
           autoComplete="username"
           aria-invalid={errors.email ? "true" : "false"}
           aria-describedby={errors.email ? "email-error" : undefined}
-          className="w-full rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2"
+          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-soft)]"
           {...register("email")}
         />
         {errors.email ? (
@@ -85,7 +85,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
           autoComplete="current-password"
           aria-invalid={errors.password ? "true" : "false"}
           aria-describedby={errors.password ? "password-error" : undefined}
-          className="w-full rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2"
+          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-soft)]"
           {...register("password")}
         />
         {errors.password ? (
@@ -104,7 +104,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-white disabled:opacity-60"
+        className="w-full rounded-md bg-[var(--color-accent)] px-4 py-2.5 font-medium text-white hover:brightness-110 disabled:opacity-60"
       >
         {isSubmitting ? "Entrando…" : "Entrar"}
       </button>

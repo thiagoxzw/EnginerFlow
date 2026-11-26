@@ -90,9 +90,9 @@ export function BomView() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
+    <div className="mx-auto grid max-w-[1600px] gap-6 p-4 md:p-6 lg:grid-cols-[300px_minmax(0,1fr)]">
       <aside className="space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-        <section aria-labelledby="bom-lista" className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <section aria-labelledby="bom-lista" className="space-y-2 card p-4">
           <h2 id="bom-lista" className="font-medium">Estruturas</h2>
           {structures.isPending ? <p className="text-sm text-[var(--color-muted)]">Carregando…</p> : null}
           {structures.data && structures.data.length === 0 ? (
