@@ -53,3 +53,8 @@ Ver a seção 7 de `FASE_2B3_STATUS.md`.
 - Migração `0007_bom_manager` (só cria tabelas). Validada em PostgreSQL 17 e no stack E2E.
 - Demonstrativo: API e web reconstruídas. Estrutura sintética `SYN Ônibus elétrico (demonstração)` e cadastro `SYN-cadastro-materiais-demo` criados pela API. Dados anteriores preservados (41 registros) e backup feito antes da migração.
 - Não há PR aberto da Fase 4 nem merge. Não iniciar a Fase 5 sem autorização.
+
+## Fase 4 — encerramento (2026-11-26)
+- Branch `feat/fase-4-bom-manager`. Revisão de código aplicada: 1 achado corrigido (linhas de outra estrutura durante carregamento). Pendências registradas em `docs/operations/FASE_4_BOM_MANAGER.md`, incluindo a definição de "material" (explosão x kit), para decisão do responsável.
+- Exportação XLSX e CSV verificadas por reabertura: zeros à esquerda, texto e proteção contra fórmula.
+- CI não roda sem PR aberto; abrir o PR para validar o CI do SHA final.
